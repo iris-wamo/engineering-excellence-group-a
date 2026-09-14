@@ -14,7 +14,7 @@ from app.main import app
 @pytest_asyncio.fixture
 async def client():
     """Simple fixture to provide an async HTTP test client."""
-    test_engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    test_engine = create_async_engine(settings.test_database_url, echo=False)
     test_session_local = sessionmaker(
         bind=test_engine, class_=AsyncSession, expire_on_commit=False
     )

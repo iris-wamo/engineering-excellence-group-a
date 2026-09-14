@@ -14,7 +14,7 @@ from app.main import app
 @pytest_asyncio.fixture
 async def client():
     """Provide an async HTTP client with DB dependency override."""
-    test_engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    test_engine = create_async_engine(settings.test_database_url, echo=False)
     test_session_local = sessionmaker(
         bind=test_engine,
         class_=AsyncSession,
@@ -114,6 +114,20 @@ async def test_update_task_status_success(client: AsyncClient):
     assert updated["status"] == "in_progress"
     assert updated["created_at"] is not None
     assert updated["updated_at"] is not None
+
+    # Verify status history & activity log audit trail created by status update
+    history_res = await client.get(f"/tasks/{task_id}/history")
+    assert history_res.status_code == 200
+    statuses = history_res.json()["statuses"]
+    assert len(statuses) == 1
+    assert statuses[0]["previous_status"] == "todo"
+    assert statuses[0]["new_status"] == "in_progress"
+
+    activity_res = await client.get(f"/tasks/{task_id}/activity")
+    assert activity_res.status_code == 200
+    activities = activity_res.json()
+    assert len(activities) == 1
+    assert activities[0]["action"] == "task.status_changed"
 
 
 @pytest.mark.asyncio

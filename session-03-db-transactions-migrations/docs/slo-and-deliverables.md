@@ -6,8 +6,16 @@ Task assignment should not create partial writes. If assignment fails, task assi
 
 ### Scope & Execution Plan
 
-- **Part A (Schema & Models)**: Define supporting SQLAlchemy models (`TaskAssignmentHistory`, `TaskStatusHistory`, `ActivityLog`, `Notification`), `Project.slug` unique constraint, and relationship mappings.
-- **Part B (Transaction Service & Rollback)**: Implement 5-step atomic task assignment service (`/tasks/{id}/assign`), partial failure rollback handling, unit tests, and demo documentation.
+- **Part A (Schema & Models)**: Define supporting SQLAlchemy models (`TaskAssignmentHistory`, `TaskStatusHistory`, `ActivityLog`, `Notification`), `Project.slug` unique constraint, and relationship mappings. *(Status: Completed)*
+- **Part B (Transaction Service & Rollback)**: Implement 5-step atomic task assignment service (`/tasks/{id}/assign`), partial failure rollback handling, unit/integration tests, standalone demo script, and demo documentation. *(Status: Completed)*
+
+### Correctness Verification Targets
+
+- **100% Atomic Commits**: 5-step transaction (task assignee update, assignment history, status history, activity log, and notification) commits atomically on success.
+- **Zero Partial Writes Guarantee**: If an exception occurs at any of steps 1 through 5, all staged records are rolled back. 0 orphan records are left in the database.
+- **Audit Immutability**: All assignment transitions preserve full lineage (`previous_assignee_id` -> `new_assignee_id`).
+- **Database Constraint Defense**: Storage-level uniqueness on `user.email`, `user.username`, and `project.slug`, and foreign key enforcement on all relationships.
+
 
 ## Migration Safety SLO
 

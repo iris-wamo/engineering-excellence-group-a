@@ -42,6 +42,9 @@ migrate-base:
 seed:
 	uv run python -m seeds.run
 
+demo-assignment:
+	uv run python -m scripts.demo_transaction_safe_assignment
+
 migration-test:
 	uv run alembic downgrade base
 	uv run alembic upgrade +1

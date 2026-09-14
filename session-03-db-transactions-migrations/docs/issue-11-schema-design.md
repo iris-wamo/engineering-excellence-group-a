@@ -123,14 +123,5 @@ Once the supporting tables have been created through the migrations, the transac
 
 ## Current Status
 
-**Part A — Schema Design: Complete**
-
-The supporting schema for Issue #11 has been defined and shared for review.
-
-### Pending
-
-- Alembic migration
-- Transaction-safe assignment implementation
-- Rollback/failure tests
-- Demo evidence
-- Loom demo
+- **Part A — Schema Design**: Complete (Schema, constraints, and relationships mapped).
+- **Part B — Transaction-Safe Assignment Flow**: Complete (`/tasks/{task_id}/assign` 5-step atomic flow, rollback guarantee tests across all 5 failure stages, database constraint tests, standalone demo script, and documentation in `demos/01-transaction-safe-assignment/demo.md`).

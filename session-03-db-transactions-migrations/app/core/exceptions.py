@@ -89,3 +89,35 @@ class AssigneeNotFoundError(HTTPException):
                 }
             },
         )
+
+
+class AssignedByNotFoundError(HTTPException):
+    """Raised when the assigning user cannot be found by ID."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "ASSIGNED_BY_NOT_FOUND",
+                    "message": "Assigning user not found",
+                }
+            },
+        )
+
+
+class SimulatedAssignmentFailureError(HTTPException):
+    """Raised when simulating a mid-transaction failure for rollback testing and demo."""
+
+    def __init__(
+        self, message: str = "Simulated mid-transaction failure triggered"
+    ) -> None:
+        super().__init__(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": "SIMULATED_TRANSACTION_FAILURE",
+                    "message": message,
+                }
+            },
+        )
