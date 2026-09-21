@@ -21,6 +21,22 @@ class Settings(BaseSettings):
     DATABASE_URL: str | None = None
     TEST_DATABASE_URL: str | None = None
 
+    # MongoDB Settings
+    MONGO_HOST: str = Field("localhost", alias="MONGO_HOST")
+    MONGO_PORT: int = Field(27017, alias="MONGO_PORT")
+    MONGO_DB_NAME: str = Field("taskflow_imports", alias="MONGO_DB_NAME")
+    MONGO_URI: str | None = None
+
+    @field_validator("MONGO_URI", mode="before")
+    @classmethod
+    def build_mongo_uri(cls, value, info):
+        if value:
+            return value
+        data = info.data
+        host = data.get("MONGO_HOST", "localhost")
+        port = data.get("MONGO_PORT", 27017)
+        return f"mongodb://{host}:{port}"
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def build_database_url(cls, value, info):

@@ -29,3 +29,13 @@ Database migrations must be safely upgradeable, tested against existing data whe
 - Supported downgrade paths must be tested.
 - No migration should unintentionally cause data loss.
 
+
+## Import Debuggability SLO
+
+Raw third-party task import payloads must remain 100% traceable through MongoDB. Failed raw imports should preserve the original JSON payload alongside execution status and detailed error messages for auditability and debugging.
+
+### Debuggability Verification Targets
+
+- **100% Payload Retention**: Every incoming import request is captured in MongoDB collection `raw_task_imports` before relational validation occurs.
+- **Traceable Error State**: Validation or database lookup failures record `processed_status = "failed"` along with the exact exception text (`error_message`) without discarding the original payload.
+- **Relational Linkage**: Successful imports record `processed_status = "success"` and store the linked PostgreSQL `postgres_task_id` UUID.
