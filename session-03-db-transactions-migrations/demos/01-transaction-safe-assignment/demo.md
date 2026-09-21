@@ -2,7 +2,7 @@
 
 ## Loom Video
 
-*Loom Video Link*: `[Paste Loom link here]`
+*Loom Video Link*: https://www.loom.com/share/49bb0495d67346afb8fb86f624862b5f
 
 ---
 
