@@ -10,7 +10,9 @@ dependencies = [
     "email-validator>=2.3.0",
     "fastapi>=0.140.6",
     "greenlet>=3.5.4",
+    "motor>=3.6.0",
     "pydantic-settings>=2.14.2",
+    "pymongo>=4.10.0",
     "sqlalchemy>=2.0.51",
     "uvicorn>=0.51.0",
 ]
@@ -61,7 +63,7 @@ ignore = [
 # Import sorting configuration (replaces isort)
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
-known-third-party = ["fastapi", "sqlalchemy", "pydantic", "alembic", "uvicorn", "asyncpg"]
+known-third-party = ["fastapi", "sqlalchemy", "pydantic", "alembic", "uvicorn", "asyncpg", "motor", "pymongo"]
 
 # Formatting configuration
 [tool.ruff.format]

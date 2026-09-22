@@ -7,10 +7,13 @@ services:
       - .env
     environment:
       - POSTGRES_HOST=postgres
+      - MONGO_URI=mongodb://mongodb:27017
       - RUN_MIGRATIONS=true
     depends_on:
       postgres:
         condition: service_healthy
+      mongodb:
+        condition: service_started
 
   postgres:
     image: postgres:16-alpine
@@ -28,16 +31,26 @@ services:
       timeout: 5s
       retries: 5
 
+  mongodb:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
   test:
     build: .
     env_file:
       - .env
     environment:
       - POSTGRES_HOST=postgres
+      - MONGO_URI=mongodb://mongodb:27017
       - RUN_MIGRATIONS=false
     depends_on:
       postgres:
         condition: service_healthy
+      mongodb:
+        condition: service_started
     volumes:
       - ./app:/app/app
       - ./tests:/app/tests
@@ -47,3 +60,4 @@ services:
 
 volumes:
   postgres_data:
+  mongo_data:
