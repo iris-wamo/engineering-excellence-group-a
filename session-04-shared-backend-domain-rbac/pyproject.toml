@@ -1,0 +1,83 @@
+[project]
+name = "engineering-excellence-group-a"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.5",
+    "asyncpg>=0.31.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.140.6",
+    "greenlet>=3.5.4",
+    "motor>=3.6.0",
+    "pydantic-settings>=2.14.2",
+    "pymongo>=4.10.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.3.0",
+    "pre-commit>=4.6.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.1",
+]
+
+# Ruff configuration
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+# Linting rules
+[tool.ruff.lint]
+# Rule families:
+# E = pycodestyle errors (PEP 8 style issues)
+# F = pyflakes (logical errors, undefined names, unused imports)
+# I = isort (import sorting)
+# N = pep8-naming (naming conventions)
+# UP = pyupgrade (automatic Python version upgrades)
+# B = flake8-bugbear (common bugs and design problems)
+# SIM = flake8-simplify (code simplification suggestions)
+# ARG = flake8-unused-arguments (unused function arguments)
+# RUF = Ruff-specific rules
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "ARG", # flake8-unused-arguments
+    "RUF", # Ruff-specific rules
+]
+ignore = [
+    "E501",  # Line too long (handled by formatter)
+    "B008",  # Do not perform function calls in argument defaults (common in FastAPI dependencies)
+]
+
+# Import sorting configuration (replaces isort)
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+known-third-party = ["fastapi", "sqlalchemy", "pydantic", "alembic", "uvicorn", "asyncpg", "motor", "pymongo"]
+
+# Formatting configuration
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-v"
+
+[tool.mypy]
+python_version = "3.12"
+explicit_package_bases = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]

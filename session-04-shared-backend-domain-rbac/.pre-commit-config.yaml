@@ -1,0 +1,35 @@
+repos:
+  # Official Ruff hooks
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^session-03-db-transactions-migrations/.*\.py$
+
+      - id: ruff-format
+        files: ^session-03-db-transactions-migrations/.*\.py$
+
+  # Official MyPy hook
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        pass_filenames: false
+        args:
+          - --config-file=session-03-db-transactions-migrations/pyproject.toml
+          - session-03-db-transactions-migrations/app
+        additional_dependencies:
+          - pydantic
+          - pydantic-settings
+          - sqlalchemy
+          - email-validator
+
+  # Local pytest hook
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: bash -c "cd session-03-db-transactions-migrations && uv run pytest"
+        language: system
+        pass_filenames: false
