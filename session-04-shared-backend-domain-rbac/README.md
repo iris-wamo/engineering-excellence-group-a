@@ -111,7 +111,7 @@ uv run ruff format --check .
 ## Directory & Demo Structure
 
 ```
-session-03-db-transactions-migrations/
+session-04-shared-backend-domain-rbac/
 ├── app/
 │   ├── main.py
 │   ├── api/
@@ -120,7 +120,8 @@ session-03-db-transactions-migrations/
 │   ├── models/
 │   ├── repositories/
 │   ├── schemas/
-│   └── services/
+│   ├── services/
+│   └── workflows/
 ├── alembic/
 │   └── versions/
 ├── demos/
@@ -134,8 +135,17 @@ session-03-db-transactions-migrations/
 │   ├── slo-and-deliverables.md
 │   ├── migration-safety-checklist.md
 │   ├── db-ide-findings.md
-│   └── research-notes.md
+│   ├── issue-11-schema-design.md
+│   ├── research-notes.md
+│   ├── workflow-design.md
+│   └── code-walkthrough.md
+├── scripts/
+│   ├── demo_transaction_safe_assignment.py
+│   └── demo_domain_workflow.py
 ├── tests/
+│   ├── unit/                     # domain workflow + service boundary tests
+│   ├── integration/              # status transition API/DB + audit/atomicity
+│   └── test_*.py                 # API and database suites
 └── README.md
 ```
 
@@ -150,6 +160,8 @@ make format        # Format code using Ruff
 make test          # Run test suite
 make run           # Start development server
 make migrate       # Run database migrations
+make demo-assignment  # Run the transaction-safe assignment demo
+make demo-workflow    # Run the task status workflow demo
 ```
 
 ---

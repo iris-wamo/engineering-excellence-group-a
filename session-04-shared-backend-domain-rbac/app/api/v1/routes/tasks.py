@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.api.dependencies.deps import PaginationParams, SessionDep
+from app.api.dependencies.deps import CurrentUserDep, PaginationParams, SessionDep
 from app.schemas.task import (
     ActivityLogResponse,
     NotificationResponse,
@@ -112,15 +112,23 @@ async def get_task(
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
     summary="Update task status",
-    description="Updates only the task status. Returns 404 if the task does not exist.",
+    description=(
+        "Updates only the task status. Requires X-User-ID header (401 if missing/unknown). "
+        "Only the assignee, a project owner/manager, or an admin may change status (403). "
+        "Transitions must follow todo -> in_progress -> in_review -> done (409 otherwise). "
+        "Returns 404 if the task does not exist."
+    ),
 )
 async def update_task_status(
     task_id: UUID,
     payload: TaskStatusUpdate,
     db: SessionDep,
+    current_user: CurrentUserDep,
 ) -> TaskResponse:
-    """PATCH /tasks/{task_id}/status - Update task status."""
-    task = await TaskService.update_task_status(db, task_id, payload)
+    """PATCH /tasks/{task_id}/status - Update task status as the acting user."""
+    task = await TaskService.update_task_status(
+        db, task_id, payload, actor=current_user
+    )
     return to_task_response(task)
 
 

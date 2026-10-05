@@ -9,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import (
     AssignedByNotFoundError,
     AssigneeNotFoundError,
+    InvalidStatusTransitionError,
     ProjectNotFoundError,
     SimulatedAssignmentFailureError,
+    StatusChangeForbiddenError,
     TaskNotFoundError,
 )
 from app.models.activity_log import ActivityLog
@@ -18,6 +20,7 @@ from app.models.notification import Notification
 from app.models.task import Task, TaskPriority, TaskStatus
 from app.models.task_assignment_history import TaskAssignmentHistory
 from app.models.task_status_history import TaskStatusHistory
+from app.models.user import User
 from app.repositories.activity_log_repository import ActivityLogRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.project_repository import ProjectRepository
@@ -36,11 +39,16 @@ from app.schemas.task import (
     TaskStatusUpdate,
     TaskStatusValue,
 )
+from app.workflows.task_status_workflow import (
+    InvalidTransitionError,
+    TaskStatusWorkflow,
+)
 
 # API uses lowercase REST values; DB enums stay UPPERCASE (existing migrations).
 _STATUS_TO_MODEL = {
     TaskStatusValue.TODO: TaskStatus.TODO,
     TaskStatusValue.IN_PROGRESS: TaskStatus.IN_PROGRESS,
+    TaskStatusValue.IN_REVIEW: TaskStatus.IN_REVIEW,
     TaskStatusValue.DONE: TaskStatus.DONE,
 }
 _STATUS_TO_API = {v: k for k, v in _STATUS_TO_MODEL.items()}
@@ -209,20 +217,54 @@ class TaskService:
         return task
 
     @staticmethod
+    async def _ensure_can_change_status(
+        db: AsyncSession, task: Task, actor: User
+    ) -> None:
+        """Enforce the Session 4 RBAC rule for status changes (403 otherwise).
+
+        Allowed: global admins, the task assignee, the project owner, and
+        project members holding OWNER/MANAGER roles.
+        """
+        if actor.role == "ADMIN":
+            return
+        if task.assigned_to == actor.id:
+            return
+
+        project = await ProjectRepository.get_by_id(db, task.project_id)
+        if project is not None and project.owner_id == actor.id:
+            return
+
+        member_role = await ProjectRepository.get_member_role(
+            db, task.project_id, actor.id
+        )
+        if member_role in {"OWNER", "MANAGER"}:
+            return
+
+        raise StatusChangeForbiddenError()
+
+    @staticmethod
     async def update_task_status(
         db: AsyncSession,
         task_id: UUID,
         payload: TaskStatusUpdate,
-        changed_by_id: UUID | None = None,
+        actor: User,
     ) -> Task:
         """Update task status and atomically record TaskStatusHistory and ActivityLog.
 
-        If changed_by_id is provided or task has assigned_by/assigned_to, the actor is recorded.
-        The operations run within a single transaction boundary to ensure audit trail consistency.
+        Authorization (assignee/project owner/manager/admin) is enforced before
+        any write; invalid workflow transitions fail with 409. The audit trail
+        always records the acting user.
+
+        Transaction safety (Session 3 pattern): the status update, the history
+        record, and the activity log are staged on one session and committed
+        exactly once. Any failure rolls all of them back, so a failed
+        transition can never leave partial state behind.
         """
         task = await TaskRepository.get_by_id(db, task_id)
         if task is None:
             raise TaskNotFoundError()
+
+        await TaskService._ensure_can_change_status(db, task, actor)
 
         target_status = _STATUS_TO_MODEL[payload.status]
         prev_status = task.status
@@ -231,43 +273,59 @@ class TaskService:
         if target_status == prev_status:
             return task
 
-        now = datetime.now(UTC).replace(tzinfo=None)
-        actor_id = changed_by_id or task.assigned_by or task.assigned_to
-
+        # Business rule lives in the workflow; translate its domain error to HTTP 409
         try:
-            # 1. Stage task status update
+            TaskStatusWorkflow.validate(prev_status, target_status)
+        except InvalidTransitionError as exc:
+            raise InvalidStatusTransitionError(
+                current=str(prev_status), target=str(target_status)
+            ) from exc
+
+        now = datetime.now(UTC).replace(tzinfo=None)
+        actor_id = actor.id
+
+        # ---- Single transaction boundary ---------------------------------
+        # Everything below commits together or not at all.
+        try:
+            # 1. Task status update (staged, not committed)
             TaskRepository.stage_update_status(db, task, target_status)
 
-            # 2. Record status history if actor is identifiable
-            if actor_id:
-                TaskRepository.add_status_history(
-                    db,
-                    task_id=task.id,
-                    previous_status=prev_status,
-                    new_status=target_status,
-                    changed_by_id=actor_id,
-                    created_at=now,
-                )
+            # 2. Status history (staged, not committed)
+            TaskRepository.add_status_history(
+                db,
+                task_id=task.id,
+                previous_status=prev_status,
+                new_status=target_status,
+                changed_by_id=actor_id,
+                created_at=now,
+            )
 
-                # 3. Record activity log
-                ActivityLogRepository.stage_create(
-                    db,
-                    task_id=task.id,
-                    actor_id=actor_id,
-                    action="task.status_changed",
-                    details={
-                        "previous_status": prev_status.value,
-                        "new_status": target_status.value,
-                    },
-                    created_at=now,
-                )
+            # 3. Activity log (staged, not committed)
+            ActivityLogRepository.stage_create(
+                db,
+                task_id=task.id,
+                actor_id=actor_id,
+                action="task.status_changed",
+                details={
+                    "previous_status": prev_status.value,
+                    "new_status": target_status.value,
+                },
+                created_at=now,
+            )
 
+            # Surface any DB-level error before COMMIT so it is rolled back
+            await db.flush()
+
+            # All three writes succeeded -> COMMIT atomically
             await db.commit()
-            await db.refresh(task)
-            return task
         except Exception:
+            # Any failure (validation-agnostic writes, flush, commit) -> undo all
             await db.rollback()
             raise
+
+        # Transaction already committed: load the persisted row
+        await db.refresh(task)
+        return task
 
     @staticmethod
     async def assign_task(
@@ -317,6 +375,15 @@ class TaskService:
             _STATUS_TO_MODEL[payload.new_status] if payload.new_status else prev_status
         )
         status_changed = target_status != prev_status
+
+        # Same workflow engine as PATCH /tasks/{id}/status; invalid moves -> 409
+        if status_changed:
+            try:
+                TaskStatusWorkflow.validate(prev_status, target_status)
+            except InvalidTransitionError as exc:
+                raise InvalidStatusTransitionError(
+                    current=str(prev_status), target=str(target_status)
+                ) from exc
 
         try:
             # Step 1: Stage task assignee/status update via Repository
