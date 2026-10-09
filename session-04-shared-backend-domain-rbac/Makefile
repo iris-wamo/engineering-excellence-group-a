@@ -45,6 +45,9 @@ seed:
 demo-assignment:
 	uv run python -m scripts.demo_transaction_safe_assignment
 
+demo-workflow:
+	uv run python -m scripts.demo_domain_workflow
+
 migration-test:
 	uv run alembic downgrade base
 	uv run alembic upgrade +1
