@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from typing import Any
+
 from fastapi import APIRouter, Depends, Query, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.api.dependencies.deps import SessionDep
 from app.db.mongodb import get_mongo_db
-from app.schemas.import_schema import RawTaskImportRequest, RawTaskImportResponse
+from app.schemas.import_schema import (
+    RawImportStatus,
+    RawTaskImportRequest,
+    RawTaskImportResponse,
+)
 from app.services.import_service import ImportService
 
 router = APIRouter(prefix="/imports/tasks", tags=["Imports"])
@@ -19,8 +24,8 @@ router = APIRouter(prefix="/imports/tasks", tags=["Imports"])
     summary="Process raw task import payload",
     description=(
         "Stores third-party raw JSON task payload in MongoDB audit store ('raw_task_imports'), "
-        "validates and normalizes records into PostgreSQL ('task' table). If validation fails, "
-        "the raw payload is preserved in MongoDB with status='failed' and error_message for traceability."
+        "marks it pending, validates and normalizes records into PostgreSQL ('task' table), "
+        "then marks the import completed or failed with trace and failure details."
     ),
 )
 async def process_raw_import(
@@ -37,13 +42,13 @@ async def process_raw_import(
     response_model=list[RawTaskImportResponse],
     status_code=status.HTTP_200_OK,
     summary="List raw import audit records from MongoDB",
-    description="Queries MongoDB collection 'raw_task_imports' with optional status filter (pending, success, failed).",
+    description="Queries MongoDB collection 'raw_task_imports' with optional status filter (pending, completed, failed).",
 )
 async def list_raw_imports(
-    status_filter: str | None = Query(
+    status_filter: RawImportStatus | None = Query(
         default=None,
         alias="status",
-        description="Filter by processed status: pending | success | failed",
+        description="Filter by processed status: pending | completed | failed",
     ),
     db_mongo: AsyncIOMotorDatabase[Any] = Depends(get_mongo_db),
 ) -> list[RawTaskImportResponse]:
