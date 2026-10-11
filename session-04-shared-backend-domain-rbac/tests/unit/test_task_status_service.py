@@ -146,8 +146,10 @@ async def test_service_rejects_invalid_transition_without_writing(monkeypatch):
     err = exc_info.value
     assert err.status_code == 409
     assert err.detail["error"]["code"] == "INVALID_STATUS_TRANSITION"
-    assert "TODO" in err.detail["error"]["message"]
-    assert "DONE" in err.detail["error"]["message"]
+    assert err.detail["error"]["message"] == (
+        "Cannot transition task status from 'todo' to 'done'. "
+        "Allowed transitions from 'todo': ['in_progress', 'cancelled']"
+    )
 
     # No repository write, no commit
     assert writes == []

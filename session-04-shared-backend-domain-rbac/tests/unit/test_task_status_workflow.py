@@ -19,6 +19,10 @@ from app.workflows.task_status_workflow import (
         (TaskStatus.TODO, TaskStatus.IN_PROGRESS),
         (TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW),
         (TaskStatus.IN_REVIEW, TaskStatus.DONE),
+        (TaskStatus.TODO, TaskStatus.CANCELLED),
+        (TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED),
+        (TaskStatus.IN_REVIEW, TaskStatus.CANCELLED),
+        (TaskStatus.DONE, TaskStatus.CANCELLED),
     ],
 )
 def test_valid_transitions_are_accepted(current, target):
@@ -56,11 +60,12 @@ def test_rejection_error_is_consistent_and_structured():
     err = exc_info.value
     assert err.current == TaskStatus.TODO
     assert err.target == TaskStatus.DONE
-    assert err.allowed == frozenset({TaskStatus.IN_PROGRESS})
+    assert err.allowed == frozenset({TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED})
     # One consistent message shape for every invalid transition
     message = str(err)
     assert "TODO -> DONE" in message
     assert "IN_PROGRESS" in message
+    assert "CANCELLED" in message
 
 
 def test_error_is_domain_level_not_http():
@@ -78,8 +83,8 @@ def test_error_is_domain_level_not_http():
 
 
 def test_terminal_states_have_no_outgoing_edges():
-    assert TaskStatusWorkflow.is_terminal(TaskStatus.DONE) is True
     assert TaskStatusWorkflow.is_terminal(TaskStatus.CANCELLED) is True
+    assert TaskStatusWorkflow.is_terminal(TaskStatus.DONE) is False
     assert TaskStatusWorkflow.is_terminal(TaskStatus.TODO) is False
 
 
@@ -87,8 +92,10 @@ def test_workflow_knows_the_full_allowed_graph():
     """Every status in the enum must be covered by the workflow map."""
     assert set(TaskStatusWorkflow.TRANSITIONS) == set(TaskStatus)
     assert TaskStatusWorkflow.allowed_next(TaskStatus.TODO) == frozenset(
-        {TaskStatus.IN_PROGRESS}
+        {TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED}
     )
-    assert TaskStatusWorkflow.allowed_next(TaskStatus.DONE) == frozenset()
+    assert TaskStatusWorkflow.allowed_next(TaskStatus.DONE) == frozenset(
+        {TaskStatus.CANCELLED}
+    )
     assert TaskStatusWorkflow.START == TaskStatus.TODO
     assert TaskStatusWorkflow.FINAL == TaskStatus.DONE

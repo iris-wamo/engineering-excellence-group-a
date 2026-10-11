@@ -199,7 +199,10 @@ async def test_api_invalid_transition_returns_expected_error(
         "detail": {
             "error": {
                 "code": "INVALID_STATUS_TRANSITION",
-                "message": ("Cannot transition task status from 'TODO' to 'DONE'"),
+                "message": (
+                    "Cannot transition task status from 'todo' to 'done'. "
+                    "Allowed transitions from 'todo': ['in_progress', 'cancelled']"
+                ),
             }
         }
     }

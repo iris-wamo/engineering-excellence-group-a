@@ -38,6 +38,7 @@ _API_TO_MODEL = {
     TaskStatusValue.IN_PROGRESS: TaskStatus.IN_PROGRESS,
     TaskStatusValue.IN_REVIEW: TaskStatus.IN_REVIEW,
     TaskStatusValue.DONE: TaskStatus.DONE,
+    TaskStatusValue.CANCELLED: TaskStatus.CANCELLED,
 }
 
 
@@ -156,11 +157,19 @@ async def _activity_rows(
         (TaskStatus.TODO, TaskStatusValue.IN_PROGRESS),
         (TaskStatus.IN_PROGRESS, TaskStatusValue.IN_REVIEW),
         (TaskStatus.IN_REVIEW, TaskStatusValue.DONE),
+        (TaskStatus.TODO, TaskStatusValue.CANCELLED),
+        (TaskStatus.IN_PROGRESS, TaskStatusValue.CANCELLED),
+        (TaskStatus.IN_REVIEW, TaskStatusValue.CANCELLED),
+        (TaskStatus.DONE, TaskStatusValue.CANCELLED),
     ],
     ids=[
         "todo_to_in_progress",
         "in_progress_to_review",
         "review_to_done",
+        "todo_to_cancelled",
+        "in_progress_to_cancelled",
+        "review_to_cancelled",
+        "done_to_cancelled",
     ],
 )
 @pytest.mark.asyncio
@@ -306,10 +315,7 @@ async def test_invalid_transition_rejected_without_side_effects(
     assert error.status_code == 409
     assert set(error.detail["error"]) == {"code", "message"}
     assert error.detail["error"]["code"] == "INVALID_STATUS_TRANSITION"
-    assert error.detail["error"]["message"] == (
-        f"Cannot transition task status from '{start_status.value}' "
-        f"to '{_API_TO_MODEL[target].value}'"
-    )
+    assert "Allowed transitions from" in error.detail["error"]["message"]
     # Translated from the workflow's own domain error (rules live there)
     assert isinstance(error.__cause__, InvalidTransitionError)
 

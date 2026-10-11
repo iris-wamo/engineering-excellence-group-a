@@ -107,16 +107,23 @@ class AssignedByNotFoundError(HTTPException):
 
 
 class InvalidStatusTransitionError(HTTPException):
-    """Raised when a task status change violates the allowed workflow (todo -> in_progress -> review -> done)."""
+    """Raised when a task status change violates the allowed workflow."""
 
-    def __init__(self, current: str, target: str) -> None:
+    def __init__(
+        self,
+        current: str,
+        target: str,
+        allowed: list[str] | None = None,
+    ) -> None:
+        allowed_statuses = allowed or []
         super().__init__(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "error": {
                     "code": "INVALID_STATUS_TRANSITION",
                     "message": (
-                        f"Cannot transition task status from '{current}' to '{target}'"
+                        f"Cannot transition task status from '{current}' to '{target}'. "
+                        f"Allowed transitions from '{current}': {allowed_statuses}"
                     ),
                 }
             },

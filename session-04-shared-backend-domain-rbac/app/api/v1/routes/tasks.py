@@ -64,7 +64,7 @@ async def list_tasks(
     status_filter: TaskStatusValue | None = Query(
         default=None,
         alias="status",
-        description="Filter by status: todo | in_progress | done",
+        description="Filter by status: todo | in_progress | in_review | done | cancelled",
     ),
     priority: TaskPriorityValue | None = Query(
         default=None,

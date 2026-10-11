@@ -4,6 +4,8 @@ Holds the business rules for moving a task through its lifecycle:
 
     todo -> in_progress -> in_review -> done
 
+Tasks can be cancelled from any non-cancelled state.
+
 Design notes:
 - Pure domain logic: no FastAPI/HTTP, no database, no repository access.
 - Invalid transitions raise the domain-level ``InvalidTransitionError``;
@@ -49,12 +51,13 @@ class InvalidTransitionError(Exception):
 class TaskStatusWorkflow:
     """Task status transition engine — the single source of truth for moves."""
 
-    # todo -> in_progress -> in_review -> done; DONE and CANCELLED are terminal.
+    # Normal path: todo -> in_progress -> in_review -> done.
+    # Cancellation is allowed from every non-cancelled state.
     TRANSITIONS: ClassVar[dict[TaskStatus, frozenset[TaskStatus]]] = {
-        TaskStatus.TODO: frozenset({TaskStatus.IN_PROGRESS}),
-        TaskStatus.IN_PROGRESS: frozenset({TaskStatus.IN_REVIEW}),
-        TaskStatus.IN_REVIEW: frozenset({TaskStatus.DONE}),
-        TaskStatus.DONE: frozenset(),
+        TaskStatus.TODO: frozenset({TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED}),
+        TaskStatus.IN_PROGRESS: frozenset({TaskStatus.IN_REVIEW, TaskStatus.CANCELLED}),
+        TaskStatus.IN_REVIEW: frozenset({TaskStatus.DONE, TaskStatus.CANCELLED}),
+        TaskStatus.DONE: frozenset({TaskStatus.CANCELLED}),
         TaskStatus.CANCELLED: frozenset(),
     }
 

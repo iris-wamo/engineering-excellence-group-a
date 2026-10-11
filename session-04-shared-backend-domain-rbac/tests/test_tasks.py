@@ -213,7 +213,10 @@ async def test_update_task_status_invalid_transition_conflict(client: AsyncClien
     assert response.status_code == 409
     error = response.json()["detail"]["error"]
     assert error["code"] == "INVALID_STATUS_TRANSITION"
-    assert "TODO" in error["message"] and "DONE" in error["message"]
+    assert error["message"] == (
+        "Cannot transition task status from 'todo' to 'done'. "
+        "Allowed transitions from 'todo': ['in_progress', 'cancelled']"
+    )
 
 
 @pytest.mark.asyncio

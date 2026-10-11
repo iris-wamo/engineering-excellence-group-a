@@ -50,6 +50,7 @@ _STATUS_TO_MODEL = {
     TaskStatusValue.IN_PROGRESS: TaskStatus.IN_PROGRESS,
     TaskStatusValue.IN_REVIEW: TaskStatus.IN_REVIEW,
     TaskStatusValue.DONE: TaskStatus.DONE,
+    TaskStatusValue.CANCELLED: TaskStatus.CANCELLED,
 }
 _STATUS_TO_API = {v: k for k, v in _STATUS_TO_MODEL.items()}
 
@@ -59,6 +60,15 @@ _PRIORITY_TO_MODEL = {
     TaskPriorityValue.HIGH: TaskPriority.HIGH,
 }
 _PRIORITY_TO_API = {v: k for k, v in _PRIORITY_TO_MODEL.items()}
+
+
+def _allowed_status_values(statuses: frozenset[TaskStatus]) -> list[str]:
+    """Return API-facing status values in workflow order for stable errors."""
+    return [
+        api_status.value
+        for api_status, model_status in _STATUS_TO_MODEL.items()
+        if model_status in statuses
+    ]
 
 
 def to_task_response(task: Task) -> TaskResponse:
@@ -278,7 +288,9 @@ class TaskService:
             TaskStatusWorkflow.validate(prev_status, target_status)
         except InvalidTransitionError as exc:
             raise InvalidStatusTransitionError(
-                current=str(prev_status), target=str(target_status)
+                current=_STATUS_TO_API[prev_status].value,
+                target=_STATUS_TO_API[target_status].value,
+                allowed=_allowed_status_values(exc.allowed),
             ) from exc
 
         now = datetime.now(UTC).replace(tzinfo=None)
@@ -382,7 +394,9 @@ class TaskService:
                 TaskStatusWorkflow.validate(prev_status, target_status)
             except InvalidTransitionError as exc:
                 raise InvalidStatusTransitionError(
-                    current=str(prev_status), target=str(target_status)
+                    current=_STATUS_TO_API[prev_status].value,
+                    target=_STATUS_TO_API[target_status].value,
+                    allowed=_allowed_status_values(exc.allowed),
                 ) from exc
 
         try:
