@@ -7,8 +7,8 @@ Locks in the Session 4 separation SLO:
 Key guarantees asserted here:
 1. The service is the orchestrator: retrieve -> authorize -> validate -> write.
 2. The workflow is invoked BEFORE any repository write.
-3. An invalid transition never touches the repository and surfaces as HTTP 409.
-4. HTTP routes hold no transition business rules.
+3. An invalid transition never touches the repository and surfaces as a domain error.
+4. HTTP routes translate domain errors without holding workflow business rules.
 """
 
 import ast
@@ -20,17 +20,16 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.api.v1.routes import tasks as tasks_routes
-from app.core.exceptions import (
-    InvalidStatusTransitionError,
-    StatusChangeForbiddenError,
-    TaskNotFoundError,
-)
+from app.core.exceptions import StatusChangeForbiddenError, TaskNotFoundError
 from app.models.task import TaskStatus
 from app.repositories.task_repository import TaskRepository
 from app.schemas.task import TaskStatusUpdate, TaskStatusValue
 from app.services import task_service
 from app.services.task_service import TaskService
-from app.workflows.task_status_workflow import TaskStatusWorkflow
+from app.workflows.task_status_workflow import (
+    InvalidTransitionError,
+    TaskStatusWorkflow,
+)
 
 
 def _fake_task(status: TaskStatus = TaskStatus.TODO) -> SimpleNamespace:
@@ -128,13 +127,13 @@ async def test_service_skips_workflow_and_write_for_same_status(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_service_rejects_invalid_transition_without_writing(monkeypatch):
-    """todo -> done: workflow rejects, nothing is persisted, HTTP 409 surfaces."""
+    """todo -> done: workflow rejects, nothing is persisted."""
     writes: list[str] = []
     task = _fake_task(TaskStatus.TODO)
     _patch_context(monkeypatch, task=task, write_log=writes)
     db = _fake_db()
 
-    with pytest.raises(InvalidStatusTransitionError) as exc_info:
+    with pytest.raises(InvalidTransitionError) as exc_info:
         await TaskService.update_task_status(
             db,
             task.id,
@@ -142,14 +141,11 @@ async def test_service_rejects_invalid_transition_without_writing(monkeypatch):
             actor=_fake_actor(),
         )
 
-    # Domain error was translated into a consistent HTTP 409
+    # Service lets the domain error bubble up for the API layer to translate.
     err = exc_info.value
-    assert err.status_code == 409
-    assert err.detail["error"]["code"] == "INVALID_STATUS_TRANSITION"
-    assert err.detail["error"]["message"] == (
-        "Cannot transition task status from 'todo' to 'done'. "
-        "Allowed transitions from 'todo': ['in_progress', 'cancelled']"
-    )
+    assert err.current == TaskStatus.TODO
+    assert err.target == TaskStatus.DONE
+    assert err.allowed == frozenset({TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED})
 
     # No repository write, no commit
     assert writes == []
@@ -223,12 +219,10 @@ def test_route_contains_no_transition_business_rules():
 
     for forbidden in (
         "TaskStatusWorkflow",
-        "InvalidTransitionError",
         "TRANSITIONS",
         "can_transition",
         "allowed_next",
         "is_terminal",
-        "app.workflows",
     ):
         assert forbidden not in source, f"route leaked workflow detail: {forbidden}"
 
@@ -246,7 +240,5 @@ def test_status_route_is_request_response_only():
 
     assert "TaskService.update_task_status(" in body_source
     assert "to_task_response(" in body_source
-    # No business decisions / error handling in the route body itself
-    assert "raise " not in body_source
+    # No business decisions in the route body itself; domain errors are translated here.
     assert "if " not in body_source
-    assert "try:" not in body_source

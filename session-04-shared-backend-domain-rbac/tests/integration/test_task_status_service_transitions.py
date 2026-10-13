@@ -10,7 +10,7 @@ Each asserts: correct status persisted, history created, activity created,
 and no unexpected error.
 
 Negative cases: invalid transitions are rejected by the workflow with a
-consistent 409 domain error and leave no state behind.
+domain error and leave no state behind.
 """
 
 import uuid
@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
-from app.core.exceptions import InvalidStatusTransitionError
 from app.models.activity_log import ActivityLog
 from app.models.project import Project, ProjectPriority, ProjectStatus
 from app.models.task import Task, TaskPriority, TaskStatus
@@ -30,7 +29,10 @@ from app.models.task_status_history import TaskStatusHistory
 from app.models.user import User
 from app.schemas.task import TaskStatusUpdate, TaskStatusValue
 from app.services.task_service import TaskService
-from app.workflows.task_status_workflow import InvalidTransitionError
+from app.workflows.task_status_workflow import (
+    InvalidTransitionError,
+    TaskStatusWorkflow,
+)
 
 # API value -> persisted model value (mirrors the service mapping)
 _API_TO_MODEL = {
@@ -298,26 +300,23 @@ async def test_invalid_transition_rejected_without_side_effects(
     target: TaskStatusValue,
     _case: str,
 ):
-    """Invalid moves fail with the consistent 409 error and persist nothing."""
+    """Invalid moves fail with the domain error and persist nothing."""
     user, task = await _seed_task(db, status=start_status)
 
     # Snapshot the trail before the attempt (should be empty for a fresh task)
     history_before = await _history_rows(verifier, task.id)
     activity_before = await _activity_rows(verifier, task.id)
 
-    with pytest.raises(InvalidStatusTransitionError) as exc_info:
+    with pytest.raises(InvalidTransitionError) as exc_info:
         await TaskService.update_task_status(
             db, task.id, TaskStatusUpdate(status=target), actor=user
         )
 
-    # 1. Consistent domain error: same type, same code, same detail shape
+    # 1. Consistent domain error with structured transition context
     error = exc_info.value
-    assert error.status_code == 409
-    assert set(error.detail["error"]) == {"code", "message"}
-    assert error.detail["error"]["code"] == "INVALID_STATUS_TRANSITION"
-    assert "Allowed transitions from" in error.detail["error"]["message"]
-    # Translated from the workflow's own domain error (rules live there)
-    assert isinstance(error.__cause__, InvalidTransitionError)
+    assert error.current == start_status
+    assert error.target == _API_TO_MODEL[target]
+    assert error.allowed == TaskStatusWorkflow.allowed_next(start_status)
 
     # 2. Task status remains unchanged (in memory and in the database)
     assert task.status == start_status
@@ -356,7 +355,7 @@ async def test_invalid_transition_leaves_existing_audit_trail_untouched(
     assert len(activity_before) == 1
 
     # in_progress -> done is illegal: nothing may change
-    with pytest.raises(InvalidStatusTransitionError):
+    with pytest.raises(InvalidTransitionError):
         await TaskService.update_task_status(
             db,
             task.id,
@@ -371,25 +370,24 @@ async def test_invalid_transition_leaves_existing_audit_trail_untouched(
 
 @pytest.mark.asyncio
 async def test_every_invalid_transition_uses_the_same_error_contract(db: AsyncSession):
-    """Consistency check across all invalid cases: identical error contract."""
-    seen: set[tuple[int, str, tuple[str, ...]]] = set()
+    """Consistency check across all invalid cases: structured domain error."""
+    seen: set[tuple[type[Exception], tuple[str, ...]]] = set()
 
     for start_status, target, _case in _INVALID_TRANSITIONS:
         user, task = await _seed_task(db, status=start_status)
-        with pytest.raises(InvalidStatusTransitionError) as exc_info:
+        with pytest.raises(InvalidTransitionError) as exc_info:
             await TaskService.update_task_status(
                 db, task.id, TaskStatusUpdate(status=target), actor=user
             )
 
         error = exc_info.value
-        assert isinstance(error.__cause__, InvalidTransitionError)
+        assert error.current == start_status
+        assert error.target == _API_TO_MODEL[target]
         seen.add(
             (
-                error.status_code,
-                error.detail["error"]["code"],
-                tuple(sorted(error.detail["error"])),
+                type(error),
+                tuple(sorted(status.value for status in error.allowed)),
             )
         )
 
-    # One and only one contract for every rejection: 409 + code + {code,message}
-    assert seen == {(409, "INVALID_STATUS_TRANSITION", ("code", "message"))}
+    assert {error_type for error_type, _allowed in seen} == {InvalidTransitionError}

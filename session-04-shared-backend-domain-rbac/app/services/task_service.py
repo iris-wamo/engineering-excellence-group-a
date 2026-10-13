@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import (
     AssignedByNotFoundError,
     AssigneeNotFoundError,
-    InvalidStatusTransitionError,
     ProjectNotFoundError,
     SimulatedAssignmentFailureError,
     StatusChangeForbiddenError,
@@ -39,10 +38,7 @@ from app.schemas.task import (
     TaskStatusUpdate,
     TaskStatusValue,
 )
-from app.workflows.task_status_workflow import (
-    InvalidTransitionError,
-    TaskStatusWorkflow,
-)
+from app.workflows.task_status_workflow import TaskStatusWorkflow
 
 # API uses lowercase REST values; DB enums stay UPPERCASE (existing migrations).
 _STATUS_TO_MODEL = {
@@ -60,15 +56,6 @@ _PRIORITY_TO_MODEL = {
     TaskPriorityValue.HIGH: TaskPriority.HIGH,
 }
 _PRIORITY_TO_API = {v: k for k, v in _PRIORITY_TO_MODEL.items()}
-
-
-def _allowed_status_values(statuses: frozenset[TaskStatus]) -> list[str]:
-    """Return API-facing status values in workflow order for stable errors."""
-    return [
-        api_status.value
-        for api_status, model_status in _STATUS_TO_MODEL.items()
-        if model_status in statuses
-    ]
 
 
 def to_task_response(task: Task) -> TaskResponse:
@@ -262,7 +249,8 @@ class TaskService:
         """Update task status and atomically record TaskStatusHistory and ActivityLog.
 
         Authorization (assignee/project owner/manager/admin) is enforced before
-        any write; invalid workflow transitions fail with 409. The audit trail
+        any write. Invalid workflow transitions raise the domain
+        InvalidTransitionError for the API layer to translate. The audit trail
         always records the acting user.
 
         Transaction safety (Session 3 pattern): the status update, the history
@@ -283,15 +271,8 @@ class TaskService:
         if target_status == prev_status:
             return task
 
-        # Business rule lives in the workflow; translate its domain error to HTTP 409
-        try:
-            TaskStatusWorkflow.validate(prev_status, target_status)
-        except InvalidTransitionError as exc:
-            raise InvalidStatusTransitionError(
-                current=_STATUS_TO_API[prev_status].value,
-                target=_STATUS_TO_API[target_status].value,
-                allowed=_allowed_status_values(exc.allowed),
-            ) from exc
+        # Business rule lives in the workflow; API layer translates domain errors.
+        TaskStatusWorkflow.validate(prev_status, target_status)
 
         now = datetime.now(UTC).replace(tzinfo=None)
         actor_id = actor.id
@@ -388,16 +369,9 @@ class TaskService:
         )
         status_changed = target_status != prev_status
 
-        # Same workflow engine as PATCH /tasks/{id}/status; invalid moves -> 409
+        # Same workflow engine as PATCH /tasks/{id}/status; API translates domain errors.
         if status_changed:
-            try:
-                TaskStatusWorkflow.validate(prev_status, target_status)
-            except InvalidTransitionError as exc:
-                raise InvalidStatusTransitionError(
-                    current=_STATUS_TO_API[prev_status].value,
-                    target=_STATUS_TO_API[target_status].value,
-                    allowed=_allowed_status_values(exc.allowed),
-                ) from exc
+            TaskStatusWorkflow.validate(prev_status, target_status)
 
         try:
             # Step 1: Stage task assignee/status update via Repository
