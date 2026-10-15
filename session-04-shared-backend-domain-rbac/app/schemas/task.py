@@ -12,7 +12,9 @@ class TaskStatusValue(enum.StrEnum):
 
     TODO = "todo"
     IN_PROGRESS = "in_progress"
+    IN_REVIEW = "in_review"
     DONE = "done"
+    CANCELLED = "cancelled"
 
 
 class TaskPriorityValue(enum.StrEnum):

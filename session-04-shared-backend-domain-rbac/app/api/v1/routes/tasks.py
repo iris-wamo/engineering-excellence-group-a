@@ -5,7 +5,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.api.dependencies.deps import PaginationParams, SessionDep
+from app.api.dependencies.deps import CurrentUserDep, PaginationParams, SessionDep
+from app.core.exceptions import InvalidStatusTransitionError
+from app.models.task import TaskStatus
 from app.schemas.task import (
     ActivityLogResponse,
     NotificationResponse,
@@ -29,8 +31,27 @@ from app.services.task_service import (
     to_task_assign_response,
     to_task_response,
 )
+from app.workflows.task_status_workflow import InvalidTransitionError
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
+
+
+def _status_value(status: TaskStatus) -> str:
+    """Convert persisted enum values to API status values."""
+    return status.value.lower()
+
+
+def _allowed_status_values(statuses: frozenset[TaskStatus]) -> list[str]:
+    """Return API-facing status values in workflow order for stable errors."""
+    return [status.value.lower() for status in TaskStatus if status in statuses]
+
+
+def _transition_error(exc: InvalidTransitionError) -> InvalidStatusTransitionError:
+    return InvalidStatusTransitionError(
+        current=_status_value(exc.current),
+        target=_status_value(exc.target),
+        allowed=_allowed_status_values(exc.allowed),
+    )
 
 
 @router.post(
@@ -64,7 +85,7 @@ async def list_tasks(
     status_filter: TaskStatusValue | None = Query(
         default=None,
         alias="status",
-        description="Filter by status: todo | in_progress | done",
+        description="Filter by status: todo | in_progress | in_review | done | cancelled",
     ),
     priority: TaskPriorityValue | None = Query(
         default=None,
@@ -112,15 +133,26 @@ async def get_task(
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
     summary="Update task status",
-    description="Updates only the task status. Returns 404 if the task does not exist.",
+    description=(
+        "Updates only the task status. Requires X-User-ID header (401 if missing/unknown). "
+        "Only the assignee, a project owner/manager, or an admin may change status (403). "
+        "Transitions must follow todo -> in_progress -> in_review -> done (409 otherwise). "
+        "Returns 404 if the task does not exist."
+    ),
 )
 async def update_task_status(
     task_id: UUID,
     payload: TaskStatusUpdate,
     db: SessionDep,
+    current_user: CurrentUserDep,
 ) -> TaskResponse:
-    """PATCH /tasks/{task_id}/status - Update task status."""
-    task = await TaskService.update_task_status(db, task_id, payload)
+    """PATCH /tasks/{task_id}/status - Update task status as the acting user."""
+    try:
+        task = await TaskService.update_task_status(
+            db, task_id, payload, actor=current_user
+        )
+    except InvalidTransitionError as exc:
+        raise _transition_error(exc) from exc
     return to_task_response(task)
 
 
@@ -151,19 +183,22 @@ async def assign_task(
     ),
 ) -> TaskAssignResponse:
     """POST /tasks/{task_id}/assign - Transaction-safe task assignment."""
-    (
-        task,
-        assignment_history,
-        status_history,
-        activity_log,
-        notification,
-    ) = await TaskService.assign_task(
-        db,
-        task_id,
-        payload,
-        simulate_failure=simulate_failure,
-        simulate_failure_step=simulate_failure_step,
-    )
+    try:
+        (
+            task,
+            assignment_history,
+            status_history,
+            activity_log,
+            notification,
+        ) = await TaskService.assign_task(
+            db,
+            task_id,
+            payload,
+            simulate_failure=simulate_failure,
+            simulate_failure_step=simulate_failure_step,
+        )
+    except InvalidTransitionError as exc:
+        raise _transition_error(exc) from exc
     return to_task_assign_response(
         task,
         assignment_history,

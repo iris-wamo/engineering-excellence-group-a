@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project, ProjectStatus
+from app.models.project_member import ProjectMember
 
 
 class ProjectRepository:
@@ -46,6 +47,19 @@ class ProjectRepository:
         projects = list(result.scalars().all())
 
         return projects, total
+
+    @staticmethod
+    async def get_member_role(
+        db: AsyncSession, project_id: UUID, user_id: UUID
+    ) -> str | None:
+        """Return the user's member_role in the project, or None if not a member."""
+        result = await db.execute(
+            select(ProjectMember.member_role).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
 
     @staticmethod
     async def create(db: AsyncSession, **kwargs) -> Project:
