@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -70,8 +71,11 @@ async def test_mongo_raw_import_success(client: AsyncClient):
     res = await client.post("/imports/tasks/raw", json=payload)
     assert res.status_code == 201
     data = res.json()
-    assert data["processed_status"] == "success"
+    assert data["processed_status"] == "completed"
     assert data["postgres_task_id"] is not None
+    assert data["import_id"] == data["id"]
+    assert data["trace_id"]
+    assert len(data["normalized_records"]) == 1
     assert data["error_message"] is None
 
 
@@ -92,4 +96,5 @@ async def test_mongo_raw_import_failed_preserves_payload(client: AsyncClient):
     data = res.json()
     assert data["processed_status"] == "failed"
     assert data["postgres_task_id"] is None
-    assert "not found in PostgreSQL" in data["error_message"]
+    assert data["normalized_records"] == []
+    assert "was not found" in data["error_message"]
