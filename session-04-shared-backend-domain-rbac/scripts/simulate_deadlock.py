@@ -42,7 +42,7 @@ async def setup_test_data(engine):
             # Create User
             await session.execute(text("""
                 INSERT INTO "user" (id, name, username, email, password_hash, role)
-                VALUES (:id, 'Deadlock Test User', 'deadlock_user', 'deadlock@example.com', 'hash', 'user')
+                VALUES (:id, 'Deadlock Test User', 'deadlock_user', 'deadlock@example.com', 'hash', 'member')
             """), {"id": USER_ID})
 
             # Create Project (including required priority column added in migration 616f4258fef2)

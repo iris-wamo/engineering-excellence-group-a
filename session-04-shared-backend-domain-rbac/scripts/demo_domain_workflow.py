@@ -10,7 +10,8 @@ Proves, over the real HTTP path (HTTP -> API -> Service -> Workflow -> DB):
 3. Invalid transitions fail with one consistent 409 domain error and leave
    no partial state (status unchanged, no history, no activity).
 4. Same-status requests are idempotent no-ops (no audit rows written).
-5. Authorization is enforced (403 for an unrelated user).
+5. Authorization is enforced (JWT required; 403 for a teammate who is not
+   the assignee).
 
 Usage:
     uv run python -m scripts.demo_domain_workflow
@@ -27,11 +28,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.dependencies.deps import get_db
+from app.auth.passwords import hash_password
+from app.auth.roles import UserRole
+from app.auth.tokens import create_access_token
 from app.core.config import settings
 from app.main import app
 from app.models.activity_log import ActivityLog
 from app.models.task import Task, TaskStatus
 from app.models.task_status_history import TaskStatusHistory
+from app.models.user import User
 from app.workflows.task_status_workflow import TaskStatusWorkflow
 
 PASS = "PASS"
@@ -119,7 +124,20 @@ async def main() -> None:
                 not TaskStatusWorkflow.can_transition(TaskStatus.TODO, TaskStatus.DONE),
             )
 
-            print_step("2", "Seed data over HTTP")
+            print_step("2", "Seed data over HTTP (as an admin, then the owner)")
+            async with factory() as session:
+                admin_user = User(
+                    name=f"Workflow Demo Admin {tag}",
+                    username=f"wf_demo_admin_{tag}",
+                    email=f"wf_demo_admin_{tag}@example.com",
+                    password_hash=hash_password("SecurePassword123!"),
+                    role=UserRole.ADMIN,
+                )
+                session.add(admin_user)
+                await session.commit()
+            admin_token = create_access_token(admin_user.id, admin_user.role).token
+            as_admin = {"Authorization": f"Bearer {admin_token}"}
+
             owner = (
                 await client.post(
                     "/users",
@@ -128,12 +146,14 @@ async def main() -> None:
                         "username": f"wf_demo_owner_{tag}",
                         "email": f"wf_demo_owner_{tag}@example.com",
                         "password": "SecurePassword123!",
+                        "role": "manager",
                     },
+                    headers=as_admin,
                 )
             ).json()
             stranger = (
                 await client.post(
-                    "/users",
+                    "/auth/signup",
                     json={
                         "name": f"Workflow Demo Stranger {tag}",
                         "username": f"wf_demo_stranger_{tag}",
@@ -142,6 +162,18 @@ async def main() -> None:
                     },
                 )
             ).json()
+
+            # The owner logs in for real and acts with their own JWT from here on.
+            login = await client.post(
+                "/auth/login",
+                data={
+                    "username": owner["username"],
+                    "password": "SecurePassword123!",
+                },
+            )
+            as_owner = {"Authorization": f"Bearer {login.json()['access_token']}"}
+            check("owner logs in (200)", login.status_code == 200)
+
             project = (
                 await client.post(
                     "/projects",
@@ -149,10 +181,15 @@ async def main() -> None:
                         "title": f"Workflow Demo Project {tag}",
                         "priority": "MEDIUM",
                         "status": "ACTIVE",
-                        "owner_id": owner["id"],
                     },
+                    headers=as_owner,
                 )
             ).json()
+            await client.post(
+                f"/projects/{project['id']}/members",
+                json={"user_id": stranger["id"]},
+                headers=as_owner,
+            )
             task = (
                 await client.post(
                     "/tasks",
@@ -161,6 +198,7 @@ async def main() -> None:
                         "project_id": project["id"],
                         "assignee_id": owner["id"],
                     },
+                    headers=as_owner,
                 )
             ).json()
             print(f"  owner    = {owner['id']}")
@@ -173,7 +211,7 @@ async def main() -> None:
             response = await client.patch(
                 f"/tasks/{task['id']}/status",
                 json={"status": "in_progress"},
-                headers={"X-User-ID": owner["id"]},
+                headers=as_owner,
             )
             body = response.json()
             print(f"  HTTP {response.status_code}  body.status={body['status']}")
@@ -188,10 +226,12 @@ async def main() -> None:
             check("exactly 1 history row", history == 1, str(history))
             check("exactly 1 activity row", activity == 1, str(activity))
 
-            trail = (await client.get(f"/tasks/{task['id']}/history")).json()[
-                "statuses"
-            ]
-            acts = (await client.get(f"/tasks/{task['id']}/activity")).json()
+            trail = (
+                await client.get(f"/tasks/{task['id']}/history", headers=as_owner)
+            ).json()["statuses"]
+            acts = (
+                await client.get(f"/tasks/{task['id']}/activity", headers=as_owner)
+            ).json()
             print(
                 f"  history  : prev={trail[0]['previous_status']} "
                 f"new={trail[0]['new_status']} by={trail[0]['changed_by_id']}"
@@ -202,7 +242,7 @@ async def main() -> None:
             response = await client.patch(
                 f"/tasks/{task['id']}/status",
                 json={"status": "in_progress"},
-                headers={"X-User-ID": owner["id"]},
+                headers=as_owner,
             )
             status, history, activity = await db_state(task["id"])
             check("API returns 200", response.status_code == 200)
@@ -218,7 +258,7 @@ async def main() -> None:
                 response = await client.patch(
                     f"/tasks/{task['id']}/status",
                     json={"status": target},
-                    headers={"X-User-ID": owner["id"]},
+                    headers=as_owner,
                 )
                 payload = response.json()["detail"]["error"]
                 print(
@@ -245,7 +285,7 @@ async def main() -> None:
                 response = await client.patch(
                     f"/tasks/{task['id']}/status",
                     json={"status": target},
-                    headers={"X-User-ID": owner["id"]},
+                    headers=as_owner,
                 )
                 print(f"  -> {target:<11} HTTP {response.status_code}")
                 check(f"{target} accepted", response.status_code == 200)
@@ -253,7 +293,7 @@ async def main() -> None:
             response = await client.patch(
                 f"/tasks/{task['id']}/status",
                 json={"status": "todo"},
-                headers={"X-User-ID": owner["id"]},
+                headers=as_owner,
             )
             payload = response.json()["detail"]["error"]
             print(
@@ -266,7 +306,7 @@ async def main() -> None:
             check("3 history rows for 3 accepted moves", history == 3, str(history))
             check("3 activity rows for 3 accepted moves", activity == 3, str(activity))
 
-            print_step("7", "Authorization: unrelated user may not change status")
+            print_step("7", "Authorization: a teammate may not change your task")
             other_task = (
                 await client.post(
                     "/tasks",
@@ -275,12 +315,16 @@ async def main() -> None:
                         "project_id": project["id"],
                         "assignee_id": owner["id"],
                     },
+                    headers=as_owner,
                 )
             ).json()
             response = await client.patch(
                 f"/tasks/{other_task['id']}/status",
                 json={"status": "in_progress"},
-                headers={"X-User-ID": stranger["id"]},
+                headers={
+                    "Authorization": "Bearer "
+                    + create_access_token(uuid.UUID(stranger["id"]), "member").token
+                },
             )
             payload = response.json()["detail"]["error"]
             print(
@@ -291,13 +335,13 @@ async def main() -> None:
             check("guarded task unchanged", status == TaskStatus.TODO, status.value)
             check("no audit rows for rejected attempt", history == 0 and activity == 0)
 
-            print_step("8", "Missing identity")
+            print_step("8", "Missing token")
             response = await client.patch(
                 f"/tasks/{other_task['id']}/status", json={"status": "in_progress"}
             )
             payload = response.json()["detail"]["error"]
             print(f"  HTTP {response.status_code} {payload['code']}")
-            check("missing X-User-ID is 401", response.status_code == 401)
+            check("missing bearer token is 401", response.status_code == 401)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

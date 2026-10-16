@@ -76,14 +76,14 @@ async def main() -> None:
             username=f"khubaib_dev_{run_id}",
             email=f"khubaib.dev.{run_id}@example.com",
             password_hash="hashed_pw_123",
-            role="developer",
+            role="member",
         )
         frontend_dev = User(
             name=f"Huzaifa Frontend ({run_id})",
             username=f"huzaifa_dev_{run_id}",
             email=f"huzaifa.dev.{run_id}@example.com",
             password_hash="hashed_pw_123",
-            role="developer",
+            role="member",
         )
         db.add_all([lead_user, backend_dev, frontend_dev])
         await db.commit()
@@ -486,7 +486,7 @@ async def main() -> None:
             username=f"dup_{run_id}",
             email=lead_user_email,  # duplicate
             password_hash="pw",
-            role="user",
+            role="member",
         )
         db.add(duplicate_user)
         try:
