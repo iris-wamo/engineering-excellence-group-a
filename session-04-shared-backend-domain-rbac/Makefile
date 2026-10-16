@@ -1,4 +1,4 @@
-.PHONY: install hooks lint lint-fix format typecheck type-check test pre-commit precommit run migrate quality docker-up docker-down docker-test docker-logs docker-migrate
+.PHONY: install hooks lint lint-fix format typecheck type-check test pre-commit precommit run migrate quality docker-up docker-down docker-test docker-logs docker-migrate create-admin
 
 install:
 	uv sync
@@ -41,6 +41,9 @@ migrate-base:
 
 seed:
 	uv run python -m seeds.run
+
+create-admin:
+	uv run python -m scripts.create_admin
 
 demo-assignment:
 	uv run python -m scripts.demo_transaction_safe_assignment
