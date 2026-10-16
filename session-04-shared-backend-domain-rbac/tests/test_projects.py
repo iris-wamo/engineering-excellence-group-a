@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.api.dependencies.deps import get_db
 from app.core.config import settings
 from app.main import app
+from tests.auth_helpers import admin_headers
 
 
 @pytest_asyncio.fixture
@@ -27,6 +28,8 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        # Default caller: a fresh admin. Tests override per request.
+        ac.headers.update(await admin_headers(test_session_local))
         yield ac
 
     app.dependency_overrides.clear()
@@ -42,6 +45,7 @@ async def test_create_project_success(client: AsyncClient):
         "username": f"owner_{uuid.uuid4().hex[:8]}",
         "email": f"owner_{uuid.uuid4().hex[:8]}@example.com",
         "password": "SecurePassword123!",
+        "role": "manager",  # projects are owned by manager-role users
     }
     user_response = await client.post("/users", json=user_payload)
     assert user_response.status_code == 201
@@ -76,6 +80,7 @@ async def test_get_project_by_id_success(client: AsyncClient):
         "username": f"get_owner_{uuid.uuid4().hex[:8]}",
         "email": f"get_{uuid.uuid4().hex[:8]}@example.com",
         "password": "SecurePassword123!",
+        "role": "manager",  # projects are owned by manager-role users
     }
     user_response = await client.post("/users", json=user_payload)
     assert user_response.status_code == 201

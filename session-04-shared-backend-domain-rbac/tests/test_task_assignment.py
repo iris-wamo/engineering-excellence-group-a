@@ -15,6 +15,12 @@ from app.models.notification import Notification
 from app.models.task import Task, TaskStatus
 from app.models.task_assignment_history import TaskAssignmentHistory
 from app.models.task_status_history import TaskStatusHistory
+from tests.auth_helpers import (
+    add_project_member,
+    admin_headers,
+    bearer,
+    promote_to_manager,
+)
 
 
 @pytest_asyncio.fixture
@@ -49,6 +55,8 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        # Default caller: a fresh admin. Tests override per request.
+        ac.headers.update(await admin_headers(test_session_local))
         yield ac
 
     app.dependency_overrides.clear()
@@ -69,6 +77,7 @@ async def _create_user(client: AsyncClient, name_prefix: str = "User") -> str:
 
 
 async def _create_project(client: AsyncClient, owner_id: str) -> str:
+    await promote_to_manager(client, owner_id)
     unique_id = str(uuid.uuid4())[:8]
     payload = {
         "title": f"Assignment Test Project {unique_id}",
@@ -86,6 +95,8 @@ async def _create_project(client: AsyncClient, owner_id: str) -> str:
 async def _create_task(
     client: AsyncClient, project_id: str, assignee_id: str | None = None
 ) -> str:
+    if assignee_id is not None:
+        await add_project_member(client, project_id, assignee_id)
     payload = {
         "title": "Implement Transaction Safety",
         "description": "Ensure task assignment flow is fully atomic",
@@ -108,15 +119,18 @@ async def test_assign_task_success_all_5_records_created(
     assignee_id = await _create_user(client, "Backend Dev")
     project_id = await _create_project(client, assigner_id)
     task_id = await _create_task(client, project_id)
+    await add_project_member(client, project_id, assignee_id)
 
     payload = {
         "assignee_id": assignee_id,
-        "assigned_by_id": assigner_id,
         "new_status": "in_progress",
         "comment": "Assigned for Sprint 3 critical path",
     }
 
-    response = await client.post(f"/tasks/{task_id}/assign", json=payload)
+    # The project manager assigns; they are recorded as the assigner.
+    response = await client.post(
+        f"/tasks/{task_id}/assign", json=payload, headers=bearer(assigner_id)
+    )
     assert response.status_code == 200
 
     data = response.json()
@@ -229,14 +243,16 @@ async def test_reassign_task_tracks_previous_assignee(client: AsyncClient):
     dev_b_id = await _create_user(client, "Dev B")
     project_id = await _create_project(client, lead_id)
     task_id = await _create_task(client, project_id, assignee_id=dev_a_id)
+    await add_project_member(client, project_id, dev_b_id)
 
     # Initial assignment is Dev A, now reassign to Dev B
     reassign_payload = {
         "assignee_id": dev_b_id,
-        "assigned_by_id": lead_id,
         "comment": "Transferring task ownership to Dev B",
     }
-    response = await client.post(f"/tasks/{task_id}/assign", json=reassign_payload)
+    response = await client.post(
+        f"/tasks/{task_id}/assign", json=reassign_payload, headers=bearer(lead_id)
+    )
     assert response.status_code == 200
 
     data = response.json()
@@ -254,12 +270,12 @@ async def test_assign_task_without_status_change_omits_status_history(
     dev_id = await _create_user(client, "Dev")
     project_id = await _create_project(client, lead_id)
     task_id = await _create_task(client, project_id)
+    await add_project_member(client, project_id, dev_id)
 
-    payload = {
-        "assignee_id": dev_id,
-        "assigned_by_id": lead_id,
-    }
-    response = await client.post(f"/tasks/{task_id}/assign", json=payload)
+    payload = {"assignee_id": dev_id}
+    response = await client.post(
+        f"/tasks/{task_id}/assign", json=payload, headers=bearer(lead_id)
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["status_history"] is None
@@ -270,10 +286,7 @@ async def test_assign_task_missing_task_returns_404(client: AsyncClient):
     """Test assigning to a non-existent task returns HTTP 404."""
     user_id = await _create_user(client)
     fake_task_id = str(uuid.uuid4())
-    payload = {
-        "assignee_id": user_id,
-        "assigned_by_id": user_id,
-    }
+    payload = {"assignee_id": user_id}
     response = await client.post(f"/tasks/{fake_task_id}/assign", json=payload)
     assert response.status_code == 404
     assert response.json()["detail"]["error"]["code"] == "TASK_NOT_FOUND"
@@ -287,30 +300,49 @@ async def test_assign_task_missing_assignee_returns_404(client: AsyncClient):
     task_id = await _create_task(client, project_id)
 
     fake_assignee_id = str(uuid.uuid4())
-    payload = {
-        "assignee_id": fake_assignee_id,
-        "assigned_by_id": lead_id,
-    }
-    response = await client.post(f"/tasks/{task_id}/assign", json=payload)
+    payload = {"assignee_id": fake_assignee_id}
+    response = await client.post(
+        f"/tasks/{task_id}/assign", json=payload, headers=bearer(lead_id)
+    )
     assert response.status_code == 404
     assert response.json()["detail"]["error"]["code"] == "ASSIGNEE_NOT_FOUND"
 
 
 @pytest.mark.asyncio
-async def test_assign_task_missing_assigned_by_returns_404(client: AsyncClient):
-    """Test assigning with a non-existent assigner returns HTTP 404."""
+async def test_assign_task_records_caller_not_body_assigner(client: AsyncClient):
+    """The assigner is the authenticated caller; a body-supplied id is ignored."""
+    lead_id = await _create_user(client, "Lead")
     dev_id = await _create_user(client, "Dev")
-    project_id = await _create_project(client, dev_id)
+    project_id = await _create_project(client, lead_id)
+    task_id = await _create_task(client, project_id)
+    await add_project_member(client, project_id, dev_id)
+
+    spoofed_assigner_id = str(uuid.uuid4())
+    payload = {"assignee_id": dev_id, "assigned_by_id": spoofed_assigner_id}
+    response = await client.post(
+        f"/tasks/{task_id}/assign", json=payload, headers=bearer(lead_id)
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["assignment_history"]["assigned_by_id"] == lead_id
+    assert data["activity_log"]["actor_id"] == lead_id
+
+
+@pytest.mark.asyncio
+async def test_assign_task_assignee_must_belong_to_project(client: AsyncClient):
+    """Assigning to someone outside the project returns 422."""
+    lead_id = await _create_user(client, "Lead")
+    outsider_id = await _create_user(client, "Outsider")
+    project_id = await _create_project(client, lead_id)
     task_id = await _create_task(client, project_id)
 
-    fake_assigner_id = str(uuid.uuid4())
-    payload = {
-        "assignee_id": dev_id,
-        "assigned_by_id": fake_assigner_id,
-    }
-    response = await client.post(f"/tasks/{task_id}/assign", json=payload)
-    assert response.status_code == 404
-    assert response.json()["detail"]["error"]["code"] == "ASSIGNED_BY_NOT_FOUND"
+    response = await client.post(
+        f"/tasks/{task_id}/assign",
+        json={"assignee_id": outsider_id},
+        headers=bearer(lead_id),
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"]["code"] == "ASSIGNEE_NOT_IN_PROJECT"
 
 
 @pytest.mark.asyncio
@@ -332,6 +364,7 @@ async def test_assign_task_atomic_rollback_guarantee_on_failure(
     dev_id = await _create_user(client, "Dev")
     project_id = await _create_project(client, lead_id)
     task_id = await _create_task(client, project_id)
+    await add_project_member(client, project_id, dev_id)
     task_uuid = uuid.UUID(task_id)
 
     # Initial state capture
@@ -373,13 +406,13 @@ async def test_assign_task_atomic_rollback_guarantee_on_failure(
     # Trigger assignment with simulated failure at specified step
     payload = {
         "assignee_id": dev_id,
-        "assigned_by_id": lead_id,
         "new_status": "in_progress",
         "comment": "Testing rollback guarantee",
     }
     response = await client.post(
         f"/tasks/{task_id}/assign?simulate_failure=true&simulate_failure_step={fail_step}",
         json=payload,
+        headers=bearer(lead_id),
     )
     assert response.status_code == 500
     assert response.json()["detail"]["error"]["code"] == "SIMULATED_TRANSACTION_FAILURE"
@@ -444,16 +477,18 @@ async def test_get_task_history_activity_and_notifications_endpoints(
     dev_b_id = await _create_user(client, "Dev B")
     project_id = await _create_project(client, lead_id)
     task_id = await _create_task(client, project_id)
+    await add_project_member(client, project_id, dev_a_id)
+    await add_project_member(client, project_id, dev_b_id)
 
     # 1. Assign to Dev A with status transition
     await client.post(
         f"/tasks/{task_id}/assign",
         json={
             "assignee_id": dev_a_id,
-            "assigned_by_id": lead_id,
             "new_status": "in_progress",
             "comment": "Initial sprint assignment",
         },
+        headers=bearer(lead_id),
     )
 
     # 2. Reassign to Dev B
@@ -461,9 +496,9 @@ async def test_get_task_history_activity_and_notifications_endpoints(
         f"/tasks/{task_id}/assign",
         json={
             "assignee_id": dev_b_id,
-            "assigned_by_id": lead_id,
             "comment": "Reassigned to Dev B",
         },
+        headers=bearer(lead_id),
     )
 
     # GET /tasks/{task_id}/history

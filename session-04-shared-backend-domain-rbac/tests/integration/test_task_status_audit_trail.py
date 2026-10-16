@@ -27,6 +27,12 @@ from app.main import app
 from app.models.activity_log import ActivityLog
 from app.models.task import Task, TaskStatus
 from app.models.task_status_history import TaskStatusHistory
+from tests.auth_helpers import (
+    add_project_member,
+    admin_headers,
+    bearer,
+    promote_to_manager,
+)
 
 
 @pytest_asyncio.fixture
@@ -57,6 +63,8 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        # Default caller: a fresh admin. Tests override per request.
+        ac.headers.update(await admin_headers(test_session_local))
         yield ac
 
     app.dependency_overrides.clear()
@@ -79,6 +87,7 @@ async def _create_user(client: AsyncClient) -> str:
 
 
 async def _create_project(client: AsyncClient, owner_id: str) -> str:
+    await promote_to_manager(client, owner_id)
     response = await client.post(
         "/projects",
         json={
@@ -95,6 +104,8 @@ async def _create_project(client: AsyncClient, owner_id: str) -> str:
 async def _create_task(
     client: AsyncClient, project_id: str, assignee_id: str | None
 ) -> str:
+    if assignee_id is not None:
+        await add_project_member(client, project_id, assignee_id)
     payload: dict[str, object] = {
         "title": "Audit trail task",
         "project_id": project_id,
@@ -163,7 +174,7 @@ async def test_every_successful_transition_writes_history_and_activity(
         response = await client.patch(
             f"/tasks/{task_id}/status",
             json={"status": expected_next.value.lower()},
-            headers={"X-User-ID": actor_id},
+            headers=bearer(actor_id),
         )
         assert response.status_code == 200
 
@@ -209,7 +220,7 @@ async def test_actor_recorded_is_the_user_who_performed_the_change(
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": owner_id},  # owner acts
+        headers=bearer(owner_id),  # owner acts
     )
     assert response.status_code == 200
 
@@ -239,7 +250,7 @@ async def test_history_and_activity_endpoints_mirror_the_transition(
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": actor_id},
+        headers=bearer(actor_id),
     )
     assert response.status_code == 200
 
@@ -285,7 +296,7 @@ async def test_noop_transition_writes_no_audit_rows(
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "todo"},  # already todo
-        headers={"X-User-ID": actor_id},
+        headers=bearer(actor_id),
     )
     assert response.status_code == 200
 
@@ -308,7 +319,7 @@ async def test_rejected_transition_writes_no_audit_rows(
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_review"},  # todo -> in_review is illegal
-        headers={"X-User-ID": actor_id},
+        headers=bearer(actor_id),
     )
     assert response.status_code == 409
 
