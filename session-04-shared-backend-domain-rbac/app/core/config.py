@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str | None = None
     TEST_DATABASE_URL: str | None = None
 
+    # JWT authentication (access tokens only, no refresh tokens)
+    JWT_SECRET_KEY: str = Field(..., min_length=32)
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(30, ge=1)
+
     # MongoDB Settings
     MONGO_HOST: str = Field("localhost", alias="MONGO_HOST")
     MONGO_PORT: int = Field(27017, alias="MONGO_PORT")
