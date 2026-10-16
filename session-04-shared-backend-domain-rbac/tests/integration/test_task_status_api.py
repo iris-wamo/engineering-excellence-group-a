@@ -31,6 +31,13 @@ from app.workflows.task_status_workflow import (
     InvalidTransitionError,
     TaskStatusWorkflow,
 )
+from tests.auth_helpers import (
+    NO_AUTH,
+    add_project_member,
+    admin_headers,
+    bearer,
+    promote_to_manager,
+)
 
 
 @pytest_asyncio.fixture
@@ -61,6 +68,8 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        # Default caller: a fresh admin. Tests override per request.
+        ac.headers.update(await admin_headers(test_session_local))
         yield ac
 
     app.dependency_overrides.clear()
@@ -83,6 +92,7 @@ async def _create_user(client: AsyncClient) -> str:
 
 
 async def _create_project(client: AsyncClient, owner_id: str) -> str:
+    await promote_to_manager(client, owner_id)
     response = await client.post(
         "/projects",
         json={
@@ -97,6 +107,7 @@ async def _create_project(client: AsyncClient, owner_id: str) -> str:
 
 
 async def _create_task(client: AsyncClient, project_id: str, assignee_id: str) -> str:
+    await add_project_member(client, project_id, assignee_id)
     response = await client.post(
         "/tasks",
         json={
@@ -159,7 +170,7 @@ async def test_api_valid_transition_end_to_end(
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": actor_id},
+        headers=bearer(actor_id),
     )
 
     # API layer: 200 + response DTO reflects the domain result
@@ -191,7 +202,7 @@ async def test_api_invalid_transition_returns_expected_error(
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "done"},
-        headers={"X-User-ID": actor_id},
+        headers=bearer(actor_id),
     )
 
     assert response.status_code == 409
@@ -218,9 +229,11 @@ async def test_api_error_contract_matches_service_and_domain_outcomes(
 ):
     """Every HTTP status is a translation of a service/domain outcome."""
     actor_id = await _create_user(client)
-    stranger_id = await _create_user(client)
+    teammate_id = await _create_user(client)
+    outsider_id = await _create_user(client)
     project_id = await _create_project(client, actor_id)
     task_id = await _create_task(client, project_id, actor_id)
+    await add_project_member(client, project_id, teammate_id)
 
     def _error_code(response) -> str:
         payload = response.json()
@@ -229,35 +242,44 @@ async def test_api_error_contract_matches_service_and_domain_outcomes(
         assert set(payload["detail"]["error"]) == {"code", "message"}
         return payload["detail"]["error"]["code"]
 
-    # 401 -- identity missing / unknown (API dependency)
+    # 401 -- token missing / names an unknown user (auth dependency)
     missing = await client.patch(
-        f"/tasks/{task_id}/status", json={"status": "in_progress"}
+        f"/tasks/{task_id}/status", json={"status": "in_progress"}, headers=NO_AUTH
     )
     assert missing.status_code == 401
-    assert _error_code(missing) == "MISSING_USER_HEADER"
+    assert _error_code(missing) == "UNAUTHORIZED"
 
     unknown = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": str(uuid.uuid4())},
+        headers=bearer(str(uuid.uuid4())),
     )
     assert unknown.status_code == 401
-    assert _error_code(unknown) == "CURRENT_USER_NOT_FOUND"
+    assert _error_code(unknown) == "UNAUTHORIZED"
 
-    # 403 -- RBAC decision made in the service
+    # 403 -- RBAC decision made in the service: in the project, not the assignee
     forbidden = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": stranger_id},
+        headers=bearer(teammate_id),
     )
     assert forbidden.status_code == 403
     assert _error_code(forbidden) == "STATUS_CHANGE_FORBIDDEN"
+
+    # 404 -- outside the project, the task is invisible
+    hidden = await client.patch(
+        f"/tasks/{task_id}/status",
+        json={"status": "in_progress"},
+        headers=bearer(outsider_id),
+    )
+    assert hidden.status_code == 404
+    assert _error_code(hidden) == "TASK_NOT_FOUND"
 
     # 404 -- task lookup outcome
     not_found = await client.patch(
         f"/tasks/{uuid.uuid4()}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": actor_id},
+        headers=bearer(actor_id),
     )
     assert not_found.status_code == 404
     assert _error_code(not_found) == "TASK_NOT_FOUND"
@@ -266,7 +288,7 @@ async def test_api_error_contract_matches_service_and_domain_outcomes(
     conflict = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "done"},
-        headers={"X-User-ID": actor_id},
+        headers=bearer(actor_id),
     )
     assert conflict.status_code == 409
     assert _error_code(conflict) == "INVALID_STATUS_TRANSITION"
@@ -301,7 +323,7 @@ async def test_api_follows_workflow_when_workflow_rejects_valid_move(
         response = await client.patch(
             f"/tasks/{task_id}/status",
             json={"status": "in_progress"},
-            headers={"X-User-ID": actor_id},
+            headers=bearer(actor_id),
         )
 
     assert response.status_code == 409
@@ -334,7 +356,7 @@ async def test_api_follows_workflow_when_workflow_accepts_invalid_move(
         response = await client.patch(
             f"/tasks/{task_id}/status",
             json={"status": "done"},
-            headers={"X-User-ID": actor_id},
+            headers=bearer(actor_id),
         )
 
     assert response.status_code == 200

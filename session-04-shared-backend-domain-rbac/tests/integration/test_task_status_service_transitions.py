@@ -24,6 +24,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from app.models.activity_log import ActivityLog
 from app.models.project import Project, ProjectPriority, ProjectStatus
+from app.models.project_member import ProjectMember
 from app.models.task import Task, TaskPriority, TaskStatus
 from app.models.task_status_history import TaskStatusHistory
 from app.models.user import User
@@ -76,7 +77,7 @@ async def _seed_task(session: AsyncSession, *, status: TaskStatus) -> tuple[User
         username=f"service_tester_{tag}",
         email=f"service_tester_{tag}@example.com",
         password_hash="not-a-real-hash",
-        role="user",
+        role="member",
     )
     session.add(user)
     await session.flush()
@@ -89,6 +90,10 @@ async def _seed_task(session: AsyncSession, *, status: TaskStatus) -> tuple[User
     )
     session.add(project)
     await session.flush()
+    # Owners manage their project (as ProjectService.create_project does).
+    session.add(
+        ProjectMember(project_id=project.id, user_id=user.id, member_role="manager")
+    )
 
     task = Task(
         project_id=project.id,

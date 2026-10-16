@@ -79,13 +79,14 @@ class TaskListResponse(BaseModel):
 
 
 class TaskAssignRequest(BaseModel):
-    """Request payload for assigning a task to a user atomically."""
+    """Request payload for assigning a task to a user atomically.
+
+    The assigning user is always the authenticated caller; it is never taken
+    from the request body, so the audit trail cannot be spoofed.
+    """
 
     assignee_id: UUID = Field(
         ..., description="UUID of the user being assigned to the task"
-    )
-    assigned_by_id: UUID = Field(
-        ..., description="UUID of the user performing the assignment"
     )
     new_status: TaskStatusValue | None = Field(
         default=None,

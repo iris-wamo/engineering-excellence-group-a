@@ -54,15 +54,16 @@ Workflow API surface:
 
 ## Allowed transitions
 
-The lifecycle is linear: `todo → in_progress → review → done`.
+The lifecycle is linear: `todo → in_progress → review → done`. Any non-cancelled
+task can also be cancelled, but only by a manager of its project or an admin.
 
 | From (DB enum) | Allowed next | Notes |
 | --- | --- | --- |
-| `TODO` | `IN_PROGRESS` | Entry status for new tasks |
-| `IN_PROGRESS` | `IN_REVIEW` | |
-| `IN_REVIEW` | `DONE` | |
-| `DONE` | *(none)* | Terminal |
-| `CANCELLED` | *(none)* | Terminal, and currently not reachable via the API |
+| `TODO` | `IN_PROGRESS`, `CANCELLED` | Entry status for new tasks |
+| `IN_PROGRESS` | `IN_REVIEW`, `CANCELLED` | |
+| `IN_REVIEW` | `DONE`, `CANCELLED` | |
+| `DONE` | `CANCELLED` | |
+| `CANCELLED` | *(none)* | Terminal |
 
 REST/API spellings (lowercase) map onto the DB enum values:
 
@@ -72,6 +73,7 @@ REST/API spellings (lowercase) map onto the DB enum values:
 | `in_progress` | `IN_PROGRESS` |
 | `in_review` | `IN_REVIEW` |
 | `done` | `DONE` |
+| `cancelled` | `CANCELLED` |
 
 ## Invalid transitions
 
@@ -101,17 +103,17 @@ Rejection returns:
 ## Business rules
 
 1. **Transition graph** — only the edges in `TaskStatusWorkflow.TRANSITIONS` are legal;
-   `DONE` and `CANCELLED` are terminal.
-2. **Identity is required** — the acting user is resolved from the `X-User-ID` header;
-   missing or unknown identity → `401`.
-3. **Authorization** — a status change is allowed only for:
-   - a global `ADMIN`, or
-   - the task's assignee, or
-   - the project owner, or
-   - a project member with role `OWNER` or `MANAGER`.
-   Anyone else → `403 STATUS_CHANGE_FORBIDDEN`. (Session 4 rule: *members can update
-   status only for tasks assigned to them*; owners/managers/admins are the documented
-   escalation paths so unassigned tasks cannot get stuck.)
+   `CANCELLED` is terminal.
+2. **Identity is required** — the acting user is resolved from the JWT bearer token;
+   a missing, invalid or expired token, or one naming a deleted user → `401 UNAUTHORIZED`.
+3. **Authorization** (see `docs/rbac-authorization-matrix.md`) — a status change is
+   allowed only for:
+   - an `admin`, or
+   - a `manager` of the task's project (any move, including cancel), or
+   - the task's assignee, if they are in the project (any move except cancel).
+   Users outside the project → `404 TASK_NOT_FOUND`; anyone else in the project →
+   `403 STATUS_CHANGE_FORBIDDEN`. Managers and admins are the escalation path, so
+   unassigned tasks cannot get stuck.
 4. **Task must exist** — unknown task id → `404`.
 5. **Idempotent no-op** — re-sending the current status returns `200` without writing
    history or activity.
@@ -172,7 +174,7 @@ Owns:
 - the route definition, request schema (`TaskStatusUpdate`) and response DTO
   (`TaskResponse`);
 - resolving the acting user through the `CurrentUserDep` dependency
-  (`X-User-ID` → `User`, `401` when missing/unknown);
+  (JWT bearer token → `User`, `401` when missing/invalid);
 - calling the service and mapping the result into the response.
 
 Does **not** own: transition rules, authorization rules, or error handling. The route
@@ -192,7 +194,7 @@ For every **successful** transition the service stages, in the same transaction:
 | `task_id` | the task that changed |
 | `previous_status` | status read before the change (e.g. `TODO`) |
 | `new_status` | status after the change (e.g. `IN_PROGRESS`) |
-| `changed_by_id` | the acting user (from `X-User-ID`) |
+| `changed_by_id` | the acting user (from the JWT) |
 | `created_at` | single timestamp shared with the activity row |
 
 **2. `activity_log` row** (`ActivityLogRepository.stage_create`)
@@ -254,10 +256,9 @@ All failures share one envelope: `{"detail": {"error": {"code": ..., "message": 
 
 | HTTP | Code | Decided by |
 | --- | --- | --- |
-| `401` | `MISSING_USER_HEADER` | API dependency (no `X-User-ID`) |
-| `401` | `CURRENT_USER_NOT_FOUND` | API dependency (unknown user id) |
+| `401` | `UNAUTHORIZED` | auth dependency (missing/invalid token, unknown user) |
 | `403` | `STATUS_CHANGE_FORBIDDEN` | service authorization rule |
-| `404` | `TASK_NOT_FOUND` | service lookup |
+| `404` | `TASK_NOT_FOUND` | service lookup, or the caller is outside the task's project |
 | `409` | `INVALID_STATUS_TRANSITION` | workflow (translated by the service) |
 
 ## Design decisions and tradeoffs
@@ -268,13 +269,13 @@ All failures share one envelope: `{"detail": {"error": {"code": ..., "message": 
 | Workflow raises a plain domain error (`InvalidTransitionError`), service translates to `409` | Keeps FastAPI/HTTP out of the domain layer | Error mapping knowledge sits in the service |
 | Service validates **before** staging any write | A rejected transition can never leave partial state | Slightly earlier failure than a DB constraint would give |
 | Linear graph with no backwards moves and no re-open | Simple, predictable flow; matches the Session 4 rule | Re-opening a task or sending it back for changes needs a new edge and a migration of expectations |
-| `CANCELLED` exists in the DB enum but is unreachable via the API and terminal | Preserves the schema/enum for future use without opening an unfinished path | Documented dead-end: changing it needs an explicit workflow decision |
+| Any non-cancelled status can move to `CANCELLED`, but only managers of the project and admins may do it | Lets a task be stopped at any point without letting members drop their own work | `DONE → CANCELLED` is allowed, so a finished task can still be withdrawn |
 | Same status returns `200` (no-op) instead of an error | Makes the endpoint idempotent-friendly for clients/retries | Callers do not get feedback that "nothing happened" beyond the unchanged status |
 | DB enum values are uppercase, REST values lowercase, mapped in one place (`_STATUS_TO_MODEL` / `_STATUS_TO_API`) | Keeps existing migrations/`taskstatus` enum untouched while exposing clean REST values | Two spellings for the same concept; the map must be kept in sync with `TaskStatusValue` |
 | Activity `details` stores DB enum values (`"IN_PROGRESS"`) while the history API returns REST values (`"in_progress"`) | `details` is free-form JSONB written at change time; the DTO layer owns the REST spelling | Slightly different formatting between the two endpoints |
 | Authorization is service-level, not part of the workflow | Workflow stays a pure "is this move legal?" component | "Who can do what" and "what is allowed" must be read in two files |
-| `X-User-ID` header is the identity source | No JWT auth exists in this session yet; keeps the contract explicit and testable | Temporary stand-in: it is client-asserted and must be replaced by real authentication (session deliverable) before production |
-| `POST /tasks/{id}/assign` reuses the same workflow validation | The status graph cannot be bypassed through the assignment endpoint | `assign` still takes its actor from the payload rather than the header (see open questions) |
+| JWT bearer token is the identity source; the user is reloaded from the DB per request | A demoted or deleted user loses access at once; the token's `role` claim is never trusted | One user lookup per request |
+| `POST /tasks/{id}/assign` reuses the same workflow validation and takes the actor from the token | The status graph cannot be bypassed through the assignment endpoint, and the audit trail cannot be spoofed via the payload | `assigned_by_id` is no longer accepted in the request body |
 
 ## Testing map
 
@@ -290,14 +291,10 @@ All failures share one envelope: `{"detail": {"error": {"code": ..., "message": 
 
 ## Open questions / future work
 
-- Replace the `X-User-ID` stand-in with real JWT authentication (signup/login) and
-  derive the actor from the token; `401` codes stay the same.
-- Decide whether `assign_task` should take the actor from the header instead of the
-  request payload, so all actor attribution has a single source.
 - Decide whether the workflow should allow sending a task back
   (`in_review → in_progress`) or re-opening a finished task; that is a product decision
   plus a transition-graph change.
-- Decide whether `CANCELLED` becomes reachable and who may set it.
+- Decide whether `DONE → CANCELLED` should stay allowed.
 - Read endpoints (`GET /tasks`, `GET /tasks/{id}`) are still unauthenticated; the
   optional tenant rule ("a user cannot read/update resources belonging to another
   workspace") is enforced only for status changes today.

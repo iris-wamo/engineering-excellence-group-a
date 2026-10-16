@@ -36,7 +36,7 @@ async def _create_test_user(db: AsyncSession, suffix: str) -> User:
         username=f"constraint_user_{suffix}",
         email=f"constraint_{suffix}@example.com",
         password_hash="SecurePassword123!",
-        role="user",
+        role="member",
     )
     db.add(user)
     await db.commit()
@@ -73,7 +73,7 @@ async def test_db_constraint_unique_user_email(db_session: AsyncSession):
         username=f"unique_username_{suffix}",
         email=user1.email,  # duplicate email
         password_hash="SecurePassword123!",
-        role="user",
+        role="member",
     )
     db_session.add(duplicate_user)
     with pytest.raises(IntegrityError) as exc_info:
@@ -97,7 +97,7 @@ async def test_db_constraint_unique_user_username(db_session: AsyncSession):
         username=user1.username,  # duplicate username
         email=f"unique_email_{suffix}@example.com",
         password_hash="SecurePassword123!",
-        role="user",
+        role="member",
     )
     db_session.add(duplicate_user)
     with pytest.raises(IntegrityError) as exc_info:

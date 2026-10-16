@@ -70,21 +70,25 @@ POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres POSTGRES_DB=taskflow uv run py
 ### 3. Equivalent raw API calls (against a running server)
 
 ```bash
+# log in as the assignee or a manager of the project (e.g. `make seed-rbac` users)
+TOKEN=$(curl -s -X POST "http://localhost:8000/auth/login" \
+  -d "username=carol&password=Password123!" | jq -r .access_token)
+
 # valid transition
 curl -X PATCH "http://localhost:8000/tasks/<TASK_ID>/status" \
   -H "Content-Type: application/json" \
-  -H "X-User-ID: <ASSIGNEE_OR_OWNER_ID>" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"status": "in_progress"}'
 
 # invalid transition (skips a step) -> 409
 curl -X PATCH "http://localhost:8000/tasks/<TASK_ID>/status" \
   -H "Content-Type: application/json" \
-  -H "X-User-ID: <ASSIGNEE_OR_OWNER_ID>" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"status": "done"}'
 
 # audit trail
-curl "http://localhost:8000/tasks/<TASK_ID>/history"
-curl "http://localhost:8000/tasks/<TASK_ID>/activity"
+curl "http://localhost:8000/tasks/<TASK_ID>/history" -H "Authorization: Bearer $TOKEN"
+curl "http://localhost:8000/tasks/<TASK_ID>/activity" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 4. Database check
@@ -109,12 +113,16 @@ SELECT action, details FROM activity_log WHERE task_id = '<TASK_ID>';
 | 5 | `PATCH {status: todo}` from `in_progress` | `409 INVALID_STATUS_TRANSITION`; no new rows |
 | 6 | Continue to `in_review`, then `done` | Both `200`; final DB status `DONE`; exactly 3 history + 3 activity rows |
 | 6 | `PATCH {status: todo}` from `done` | `409` (terminal state frozen) |
-| 7 | Unrelated user changes someone else's task | `403 STATUS_CHANGE_FORBIDDEN`; task unchanged; no rows |
-| 8 | Request without `X-User-ID` | `401 MISSING_USER_HEADER` |
+| 7 | A teammate (project member, not the assignee) changes someone else's task | `403 STATUS_CHANGE_FORBIDDEN`; task unchanged; no rows |
+| 8 | Request without a bearer token | `401 UNAUTHORIZED` |
 
 ---
 
 ## Actual Findings
+
+> Recorded before JWT authentication replaced the `X-User-ID` header. Since then the
+> 401 code is `UNAUTHORIZED` and identity comes from the bearer token; the workflow
+> results are unchanged.
 
 Every expectation held:
 
@@ -286,8 +294,6 @@ the transaction, and then proves the rollback removed it.
 
 ## Open Questions
 
-- **Authentication:** `X-User-ID` is a test stand-in for identity. When JWT auth lands,
-  the header should be replaced by the token subject and the `401` codes kept as-is.
 - **Backwards moves:** should `in_review → in_progress` (send back for changes) be
   allowed? Today it is rejected; adding it is a product decision plus a graph change.
 - **Re-opening:** should `done → todo` ever be permitted for reopened tickets, and who

@@ -91,21 +91,6 @@ class AssigneeNotFoundError(HTTPException):
         )
 
 
-class AssignedByNotFoundError(HTTPException):
-    """Raised when the assigning user cannot be found by ID."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": {
-                    "code": "ASSIGNED_BY_NOT_FOUND",
-                    "message": "Assigning user not found",
-                }
-            },
-        )
-
-
 class InvalidStatusTransitionError(HTTPException):
     """Raised when a task status change violates the allowed workflow."""
 
@@ -130,31 +115,50 @@ class InvalidStatusTransitionError(HTTPException):
         )
 
 
-class MissingUserHeaderError(HTTPException):
-    """Raised when the X-User-ID header identifying the acting user is absent."""
+class NotAuthenticatedError(HTTPException):
+    """Raised when the bearer token is missing, invalid, expired or names no user."""
 
-    def __init__(self) -> None:
+    def __init__(self, message: str = "Not authenticated") -> None:
         super().__init__(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "error": {
-                    "code": "MISSING_USER_HEADER",
-                    "message": "X-User-ID header is required for this operation",
+                    "code": "UNAUTHORIZED",
+                    "message": message,
                 }
             },
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
 
-class CurrentUserNotFoundError(HTTPException):
-    """Raised when the X-User-ID header does not match any existing user."""
+class InvalidCredentialsError(HTTPException):
+    """Raised when login receives an unknown username/email or a wrong password."""
 
     def __init__(self) -> None:
         super().__init__(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "error": {
-                    "code": "CURRENT_USER_NOT_FOUND",
-                    "message": "Current user not found",
+                    "code": "INVALID_CREDENTIALS",
+                    "message": "Incorrect username/email or password",
+                }
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+class ForbiddenError(HTTPException):
+    """Raised when an authenticated user's role does not allow the action."""
+
+    def __init__(
+        self, message: str = "You do not have permission to perform this action"
+    ) -> None:
+        super().__init__(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": message,
                 }
             },
         )
@@ -170,9 +174,85 @@ class StatusChangeForbiddenError(HTTPException):
                 "error": {
                     "code": "STATUS_CHANGE_FORBIDDEN",
                     "message": (
-                        "Only the assignee, a project owner/manager, or an admin "
-                        "can change a task's status"
+                        "Only the assignee, a manager of the project, or an admin "
+                        "can change a task's status; only managers and admins "
+                        "can cancel a task"
                     ),
+                }
+            },
+        )
+
+
+class InvalidRoleAssignmentError(HTTPException):
+    """Raised when a user cannot take the requested role (e.g. a member as manager)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "error": {
+                    "code": "INVALID_ROLE_ASSIGNMENT",
+                    "message": message,
+                }
+            },
+        )
+
+
+class CannotChangeOwnRoleError(HTTPException):
+    """Raised when an admin tries to change their own global role."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "CANNOT_CHANGE_OWN_ROLE",
+                    "message": "Admins cannot change their own role",
+                }
+            },
+        )
+
+
+class AlreadyProjectMemberError(HTTPException):
+    """Raised when adding a user who already belongs to the project."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "ALREADY_PROJECT_MEMBER",
+                    "message": "User is already a member of this project",
+                }
+            },
+        )
+
+
+class ProjectMemberNotFoundError(HTTPException):
+    """Raised when removing a user who is not a member of the project."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "PROJECT_MEMBER_NOT_FOUND",
+                    "message": "User is not a member of this project",
+                }
+            },
+        )
+
+
+class AssigneeNotInProjectError(HTTPException):
+    """Raised when a task would be assigned to someone outside its project."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "error": {
+                    "code": "ASSIGNEE_NOT_IN_PROJECT",
+                    "message": "Assignee must be a member of the task's project",
                 }
             },
         )

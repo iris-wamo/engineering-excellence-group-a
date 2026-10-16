@@ -32,6 +32,12 @@ from app.models.activity_log import ActivityLog
 from app.models.task import Task, TaskStatus
 from app.models.task_status_history import TaskStatusHistory
 from app.services import task_service
+from tests.auth_helpers import (
+    add_project_member,
+    admin_headers,
+    bearer,
+    promote_to_manager,
+)
 
 
 @pytest_asyncio.fixture
@@ -62,6 +68,8 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        # Default caller: a fresh admin. Tests override per request.
+        ac.headers.update(await admin_headers(test_session_local))
         yield ac
 
     app.dependency_overrides.clear()
@@ -84,6 +92,7 @@ async def _create_user(client: AsyncClient) -> str:
 
 
 async def _create_project(client: AsyncClient, owner_id: str) -> str:
+    await promote_to_manager(client, owner_id)
     response = await client.post(
         "/projects",
         json={
@@ -98,6 +107,7 @@ async def _create_project(client: AsyncClient, owner_id: str) -> str:
 
 
 async def _create_task(client: AsyncClient, project_id: str, assignee_id: str) -> str:
+    await add_project_member(client, project_id, assignee_id)
     response = await client.post(
         "/tasks",
         json={
@@ -208,7 +218,7 @@ async def test_flush_then_failure_proves_rollback_of_written_rows(
             await client.patch(
                 f"/tasks/{task_id}/status",
                 json={"status": "in_progress"},
-                headers={"X-User-ID": actor_id},
+                headers=bearer(actor_id),
             )
 
     # The service explicitly rolled the failed transaction back
@@ -244,7 +254,7 @@ async def test_failure_creating_history_rolls_back_task_update(
             await client.patch(
                 f"/tasks/{task_id}/status",
                 json={"status": "in_progress"},
-                headers={"X-User-ID": actor_id},
+                headers=bearer(actor_id),
             )
 
     # The staged status update must not survive on its own
@@ -270,7 +280,7 @@ async def test_failure_creating_activity_rolls_back_task_and_history(
             await client.patch(
                 f"/tasks/{task_id}/status",
                 json={"status": "in_progress"},
-                headers={"X-User-ID": actor_id},
+                headers=bearer(actor_id),
             )
 
     await _assert_transition_fully_rolled_back(test_session, task_uuid)
@@ -295,7 +305,7 @@ async def test_failure_at_commit_rolls_back_all_three_writes(
             await client.patch(
                 f"/tasks/{task_id}/status",
                 json={"status": "in_progress"},
-                headers={"X-User-ID": actor_id},
+                headers=bearer(actor_id),
             )
 
     await _assert_transition_fully_rolled_back(test_session, task_uuid)
@@ -319,7 +329,7 @@ async def test_failure_at_flush_rolls_back_all_three_writes(
             await client.patch(
                 f"/tasks/{task_id}/status",
                 json={"status": "in_progress"},
-                headers={"X-User-ID": actor_id},
+                headers=bearer(actor_id),
             )
 
     await _assert_transition_fully_rolled_back(test_session, task_uuid)
@@ -344,7 +354,7 @@ async def test_failed_transition_does_not_poison_later_success(
             await client.patch(
                 f"/tasks/{task_id}/status",
                 json={"status": "in_progress"},
-                headers={"X-User-ID": actor_id},
+                headers=bearer(actor_id),
             )
 
     await _assert_transition_fully_rolled_back(test_session, task_uuid)
@@ -353,7 +363,7 @@ async def test_failed_transition_does_not_poison_later_success(
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": actor_id},
+        headers=bearer(actor_id),
     )
     assert response.status_code == 200
 

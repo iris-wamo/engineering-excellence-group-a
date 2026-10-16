@@ -6,9 +6,15 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.permissions import (
+    is_admin,
+    require_project_access,
+    require_project_manager,
+)
 from app.core.exceptions import (
-    AssignedByNotFoundError,
     AssigneeNotFoundError,
+    AssigneeNotInProjectError,
+    ForbiddenError,
     ProjectNotFoundError,
     SimulatedAssignmentFailureError,
     StatusChangeForbiddenError,
@@ -150,20 +156,46 @@ def to_task_assign_response(
     )
 
 
+async def _ensure_assignee_in_project(
+    db: AsyncSession, project_id: UUID, assignee_id: UUID
+) -> User:
+    """The assignee must exist (404) and belong to the task's project (422)."""
+    assignee = await UserRepository.get_by_id(db, assignee_id)
+    if assignee is None:
+        raise AssigneeNotFoundError()
+    if await ProjectRepository.get_member_role(db, project_id, assignee_id) is None:
+        raise AssigneeNotInProjectError()
+    return assignee
+
+
 class TaskService:
     """Business logic service layer for Task management."""
 
     @staticmethod
-    async def create_task(db: AsyncSession, payload: TaskCreate) -> Task:
-        """Create a new task after validating project and optional assignee."""
+    async def create_task(db: AsyncSession, payload: TaskCreate, actor: User) -> Task:
+        """Create a new task after validating project and optional assignee.
+
+        Admins and project managers may assign the task to any project member.
+        Members may create tasks only for themselves: the task is assigned to
+        them, and naming another assignee is forbidden (403).
+        """
+        access = await require_project_access(
+            db, payload.project_id, actor, not_found=ProjectNotFoundError()
+        )
         project = await ProjectRepository.get_by_id(db, payload.project_id)
         if project is None:
             raise ProjectNotFoundError()
 
-        if payload.assignee_id is not None:
-            assignee = await UserRepository.get_by_id(db, payload.assignee_id)
-            if assignee is None:
-                raise AssigneeNotFoundError()
+        assignee_id = payload.assignee_id
+        if not access.can_manage:
+            if assignee_id is not None and assignee_id != actor.id:
+                raise ForbiddenError(
+                    "Members can only create tasks assigned to themselves"
+                )
+            assignee_id = actor.id
+
+        if assignee_id is not None:
+            await _ensure_assignee_in_project(db, payload.project_id, assignee_id)
 
         # Strip timezone info to match DB column type (TIMESTAMP WITHOUT TIME ZONE)
         deadline = payload.deadline
@@ -177,7 +209,8 @@ class TaskService:
             priority=_PRIORITY_TO_MODEL[payload.priority],
             status=_STATUS_TO_MODEL[payload.status],
             project_id=payload.project_id,
-            assigned_to=payload.assignee_id,
+            assigned_to=assignee_id,
+            assigned_by=actor.id if assignee_id is not None else None,
             estimated_time=payload.estimated_time,
             deadline=deadline,
         )
@@ -185,6 +218,7 @@ class TaskService:
     @staticmethod
     async def get_tasks(
         db: AsyncSession,
+        actor: User,
         *,
         page: int = 1,
         page_size: int = 10,
@@ -193,12 +227,13 @@ class TaskService:
         project_id: UUID | None = None,
         assignee_id: UUID | None = None,
     ) -> tuple[list[Task], int]:
-        """Fetch a paginated list of tasks with optional filters."""
+        """Fetch tasks; non-admins only see tasks in projects they belong to."""
         offset = (page - 1) * page_size
         return await TaskRepository.get_all(
             db,
             limit=page_size,
             offset=offset,
+            member_user_id=None if is_admin(actor) else actor.id,
             status=_STATUS_TO_MODEL[status] if status else None,
             priority=_PRIORITY_TO_MODEL[priority] if priority else None,
             project_id=project_id,
@@ -206,35 +241,33 @@ class TaskService:
         )
 
     @staticmethod
-    async def get_task(db: AsyncSession, task_id: UUID) -> Task:
-        """Fetch a task by UUID or raise TaskNotFoundError."""
+    async def get_task(db: AsyncSession, task_id: UUID, actor: User) -> Task:
+        """Fetch a task in a project the actor belongs to, else TaskNotFoundError."""
         task = await TaskRepository.get_by_id(db, task_id)
         if task is None:
             raise TaskNotFoundError()
+        await require_project_access(
+            db, task.project_id, actor, not_found=TaskNotFoundError()
+        )
         return task
 
     @staticmethod
     async def _ensure_can_change_status(
-        db: AsyncSession, task: Task, actor: User
+        db: AsyncSession, task: Task, actor: User, target_status: TaskStatus
     ) -> None:
-        """Enforce the Session 4 RBAC rule for status changes (403 otherwise).
+        """Enforce the RBAC rule for status changes.
 
-        Allowed: global admins, the task assignee, the project owner, and
-        project members holding OWNER/MANAGER roles.
+        - Outside the task's project (and not admin): 404, as if it did not exist.
+        - Admins and managers of the project: any status change.
+        - Members: only on tasks assigned to them, and never to ``cancelled``.
+        Anyone else in the project gets 403.
         """
-        if actor.role == "ADMIN":
-            return
-        if task.assigned_to == actor.id:
-            return
-
-        project = await ProjectRepository.get_by_id(db, task.project_id)
-        if project is not None and project.owner_id == actor.id:
-            return
-
-        member_role = await ProjectRepository.get_member_role(
-            db, task.project_id, actor.id
+        access = await require_project_access(
+            db, task.project_id, actor, not_found=TaskNotFoundError()
         )
-        if member_role in {"OWNER", "MANAGER"}:
+        if access.can_manage:
+            return
+        if task.assigned_to == actor.id and target_status != TaskStatus.CANCELLED:
             return
 
         raise StatusChangeForbiddenError()
@@ -248,7 +281,7 @@ class TaskService:
     ) -> Task:
         """Update task status and atomically record TaskStatusHistory and ActivityLog.
 
-        Authorization (assignee/project owner/manager/admin) is enforced before
+        Authorization (assignee/project manager/admin) is enforced before
         any write. Invalid workflow transitions raise the domain
         InvalidTransitionError for the API layer to translate. The audit trail
         always records the acting user.
@@ -262,9 +295,9 @@ class TaskService:
         if task is None:
             raise TaskNotFoundError()
 
-        await TaskService._ensure_can_change_status(db, task, actor)
-
         target_status = _STATUS_TO_MODEL[payload.status]
+        await TaskService._ensure_can_change_status(db, task, actor, target_status)
+
         prev_status = task.status
 
         # If status did not change, return early without recording audit history
@@ -325,6 +358,7 @@ class TaskService:
         db: AsyncSession,
         task_id: UUID,
         payload: TaskAssignRequest,
+        actor: User,
         *,
         simulate_failure: bool = False,
         simulate_failure_step: int = 5,
@@ -348,18 +382,27 @@ class TaskService:
         The Service layer controls the transaction boundary (commit/rollback).
         If any error occurs or simulate_failure is enabled, the transaction is rolled back,
         ensuring zero partial writes.
+
+        Authorization: only a manager of the task's project or an admin may
+        assign (members 403, outsiders 404). The assignee must belong to the
+        project, and the acting user is recorded as the assigner.
         """
         task = await TaskRepository.get_by_id(db, task_id)
         if task is None:
             raise TaskNotFoundError()
 
-        new_assignee = await UserRepository.get_by_id(db, payload.assignee_id)
-        if new_assignee is None:
-            raise AssigneeNotFoundError()
+        await require_project_manager(
+            db,
+            task.project_id,
+            actor,
+            not_found=TaskNotFoundError(),
+            message="Only a manager of this project or an admin can assign tasks",
+        )
 
-        assigned_by_user = await UserRepository.get_by_id(db, payload.assigned_by_id)
-        if assigned_by_user is None:
-            raise AssignedByNotFoundError()
+        new_assignee = await _ensure_assignee_in_project(
+            db, task.project_id, payload.assignee_id
+        )
+        assigned_by_user = actor
 
         now = datetime.now(UTC).replace(tzinfo=None)
         prev_assignee_id = task.assigned_to
@@ -379,7 +422,7 @@ class TaskService:
                 db,
                 task,
                 assignee_id=payload.assignee_id,
-                assigned_by_id=payload.assigned_by_id,
+                assigned_by_id=assigned_by_user.id,
                 new_status=target_status if status_changed else None,
                 now=now,
             )
@@ -395,7 +438,7 @@ class TaskService:
                 task_id=task.id,
                 previous_assignee_id=prev_assignee_id,
                 new_assignee_id=payload.assignee_id,
-                assigned_by_id=payload.assigned_by_id,
+                assigned_by_id=assigned_by_user.id,
                 created_at=now,
             )
 
@@ -412,7 +455,7 @@ class TaskService:
                     task_id=task.id,
                     previous_status=prev_status,
                     new_status=target_status,
-                    changed_by_id=payload.assigned_by_id,
+                    changed_by_id=assigned_by_user.id,
                     created_at=now,
                 )
 
@@ -440,7 +483,7 @@ class TaskService:
             activity_log = ActivityLogRepository.stage_create(
                 db,
                 task_id=task.id,
-                actor_id=payload.assigned_by_id,
+                actor_id=assigned_by_user.id,
                 action="task.assigned",
                 details=activity_details,
                 created_at=now,
@@ -489,33 +532,29 @@ class TaskService:
 
     @staticmethod
     async def get_task_history(
-        db: AsyncSession, task_id: UUID
+        db: AsyncSession, task_id: UUID, actor: User
     ) -> tuple[list[TaskAssignmentHistory], list[TaskStatusHistory]]:
         """Retrieve full assignment and status history for a task."""
-        task = await TaskRepository.get_by_id(db, task_id)
-        if task is None:
-            raise TaskNotFoundError()
+        await TaskService.get_task(db, task_id, actor)
 
         assignments = await TaskRepository.get_assignment_history(db, task_id)
         statuses = await TaskRepository.get_status_history(db, task_id)
         return assignments, statuses
 
     @staticmethod
-    async def get_task_activity(db: AsyncSession, task_id: UUID) -> list[ActivityLog]:
+    async def get_task_activity(
+        db: AsyncSession, task_id: UUID, actor: User
+    ) -> list[ActivityLog]:
         """Retrieve all activity logs for a task."""
-        task = await TaskRepository.get_by_id(db, task_id)
-        if task is None:
-            raise TaskNotFoundError()
+        await TaskService.get_task(db, task_id, actor)
 
         return await ActivityLogRepository.get_by_task_id(db, task_id)
 
     @staticmethod
     async def get_task_notifications(
-        db: AsyncSession, task_id: UUID
+        db: AsyncSession, task_id: UUID, actor: User
     ) -> list[Notification]:
         """Retrieve all notifications for a task."""
-        task = await TaskRepository.get_by_id(db, task_id)
-        if task is None:
-            raise TaskNotFoundError()
+        await TaskService.get_task(db, task_id, actor)
 
         return await NotificationRepository.get_by_task_id(db, task_id)

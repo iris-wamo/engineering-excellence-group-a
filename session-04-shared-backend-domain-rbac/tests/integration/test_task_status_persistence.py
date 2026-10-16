@@ -27,6 +27,12 @@ from app.main import app
 from app.models.activity_log import ActivityLog
 from app.models.task import Task, TaskStatus
 from app.models.task_status_history import TaskStatusHistory
+from tests.auth_helpers import (
+    add_project_member,
+    admin_headers,
+    bearer,
+    promote_to_manager,
+)
 
 
 @pytest_asyncio.fixture
@@ -61,6 +67,8 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        # Default caller: a fresh admin. Tests override per request.
+        ac.headers.update(await admin_headers(test_session_local))
         yield ac
 
     app.dependency_overrides.clear()
@@ -81,6 +89,7 @@ async def _create_user(client: AsyncClient) -> str:
 
 
 async def _create_project(client: AsyncClient, owner_id: str) -> str:
+    await promote_to_manager(client, owner_id)
     payload = {
         "title": "Persistence Project",
         "description": "Project used for status persistence tests",
@@ -94,6 +103,7 @@ async def _create_project(client: AsyncClient, owner_id: str) -> str:
 
 
 async def _create_task(client: AsyncClient, project_id: str, assignee_id: str) -> str:
+    await add_project_member(client, project_id, assignee_id)
     payload = {
         "title": "Persist todo -> in_progress",
         "project_id": project_id,
@@ -124,7 +134,7 @@ async def test_valid_transition_updates_task_status_in_database(
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": owner_id},
+        headers=bearer(owner_id),
     )
     assert response.status_code == 200
 
@@ -150,7 +160,7 @@ async def test_transition_commit_is_visible_to_a_fresh_connection(client: AsyncC
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": owner_id},
+        headers=bearer(owner_id),
     )
     assert response.status_code == 200
 
@@ -198,7 +208,7 @@ async def test_subsequent_db_read_shows_new_status_and_audit_trail(
     await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": owner_id},
+        headers=bearer(owner_id),
     )
 
     # Re-read the task through a later, independent query
@@ -250,7 +260,7 @@ async def test_rejected_transition_leaves_zero_partial_writes(
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "done"},  # todo -> done skips the workflow
-        headers={"X-User-ID": owner_id},
+        headers=bearer(owner_id),
     )
     assert response.status_code == 409
 
@@ -294,7 +304,7 @@ async def test_each_step_of_workflow_commits_in_order(
         response = await client.patch(
             f"/tasks/{task_id}/status",
             json={"status": next_status},
-            headers={"X-User-ID": owner_id},
+            headers=bearer(owner_id),
         )
         assert response.status_code == 200
 

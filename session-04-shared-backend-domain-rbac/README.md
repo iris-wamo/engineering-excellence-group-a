@@ -76,6 +76,39 @@ Access API Documentation:
 
 ---
 
+## Authentication & RBAC (Session 4)
+
+Every endpoint except `POST /auth/signup`, `POST /auth/login` and `GET /health`
+requires a JWT bearer token. Roles are `admin`, `manager` and `member`; see
+[docs/rbac-authorization-matrix.md](docs/rbac-authorization-matrix.md) for who can
+do what.
+
+1. Add the JWT settings to `.env` (see `.env.example`). `JWT_SECRET_KEY` is required,
+   at least 32 characters:
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```
+2. Apply migrations (`make migrate`). Migration `c4a7e2f19b3d` lowercases existing
+   roles and makes every project owner that project's manager.
+3. Create the first admin. Signup always creates members:
+   ```bash
+   make create-admin            # prompts for email, username, name, password
+   ```
+4. Optional: load demo data. 3 projects are created by the admin and 1 by a manager,
+   with managers and members (all with password `Password123!`):
+   ```bash
+   make seed-rbac
+   ```
+5. Log in and call the API:
+   ```bash
+   TOKEN=$(curl -s -X POST localhost:8000/auth/login \
+     -d "username=alice&password=Password123!" | jq -r .access_token)
+   curl localhost:8000/projects -H "Authorization: Bearer $TOKEN"
+   ```
+   In Swagger, use **Authorize** with a username (or email) and password.
+
+---
+
 ## Session 3 Features & Architecture
 
 ### Database Models (`app/models/`)
@@ -98,6 +131,11 @@ Access API Documentation:
 ```bash
 POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres POSTGRES_DB=taskflow uv run pytest
 ```
+
+Tests run against `TEST_DATABASE_URL`, which must be migrated to head first
+(`DATABASE_URL=<test db url> uv run alembic upgrade head`). `tests/conftest.py`
+supplies a test-only `JWT_SECRET_KEY` when none is set. The RBAC suite lives in
+`tests/auth/`.
 
 ### Code Formatting & Linting
 

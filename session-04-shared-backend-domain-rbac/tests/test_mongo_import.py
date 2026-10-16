@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -9,7 +10,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.dependencies.deps import get_db
 from app.core.config import settings
+from app.db.mongodb import MongoDBManager
 from app.main import app
+from tests.auth_helpers import admin_headers
 
 
 @pytest_asyncio.fixture
@@ -30,10 +33,15 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        # Default caller: a fresh admin. Tests override per request.
+        ac.headers.update(await admin_headers(test_session_local))
         yield ac
 
     app.dependency_overrides.clear()
     await test_engine.dispose()
+    # The Motor client is a process-wide singleton bound to this test's event
+    # loop; close it so the next test creates one on its own loop.
+    MongoDBManager.close()
 
 
 @pytest.mark.asyncio
@@ -45,6 +53,7 @@ async def test_mongo_raw_import_success(client: AsyncClient):
         "username": f"import_usr_{unique_id}",
         "email": f"import_user_{unique_id}@example.com",
         "password": "SecurePassword123!",
+        "role": "manager",  # projects are owned by manager-role users
     }
     user_res = await client.post("/users", json=user_payload)
     assert user_res.status_code == 201
@@ -52,6 +61,7 @@ async def test_mongo_raw_import_success(client: AsyncClient):
     project_payload = {
         "title": f"Import Demo Project {unique_id}",
         "description": "Demo project for raw imports",
+        "priority": "MEDIUM",
         "owner_id": user_res.json()["id"],
     }
     proj_res = await client.post("/projects", json=project_payload)
