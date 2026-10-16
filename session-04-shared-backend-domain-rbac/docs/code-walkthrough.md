@@ -128,19 +128,19 @@ Order of operations, and the reason each step sits where it does:
 7. **Refresh and return** the persisted row.
 
 The authorization helper (`_ensure_can_change_status`) is an allow-list with the deny
-at the end:
+at the end (updated for JWT auth and membership-based RBAC):
 
 ```python
-if actor.role == "ADMIN":                    return
-if task.assigned_to == actor.id:             return
-if project.owner_id == actor.id:             return
-if member_role in {"OWNER", "MANAGER"}:      return
+access = await require_project_access(...)   # outside the project -> 404
+if access.can_manage:                        return  # admin or project manager
+if task.assigned_to == actor.id and target != CANCELLED: return
 raise StatusChangeForbiddenError()           # everyone else lands here
 ```
 
 Fail-closed: a new caller isn't allowed by accident, they have to match one of the
-four rules explicitly. It maps one-to-one onto the Session 4 suggested rules
-(members only for their own tasks, managers/owners/admins as the escalation paths).
+rules explicitly. It maps onto the Session 4 rules (members only for their own tasks,
+managers/admins as the escalation paths). The full matrix is in
+`docs/rbac-authorization-matrix.md`.
 
 The transaction block, which I kept in the Session 3 style:
 
@@ -191,9 +191,10 @@ unknown identity, 403 for the RBAC denial. One choice worth remembering: an unkn
 user in the header is 401, not 404 — it's credential validation, not a resource
 lookup.
 
-**`app/api/dependencies/deps.py`** — `get_current_user` reads `X-User-ID`, looks the
-user up, raises 401 if either is missing. This is a placeholder for real JWT auth
-later; the contract (401 with those codes) stays the same when it's swapped out.
+**`app/auth/dependencies.py`** — `get_current_user` decodes the JWT bearer token,
+reloads the user from the DB and raises `401 UNAUTHORIZED` if the token is missing,
+invalid or names no user. (It replaced the earlier `X-User-ID` stand-in in
+`app/api/dependencies/deps.py`.)
 
 **`app/api/v1/routes/tasks.py`** — the endpoint is intentionally five lines: call the
 service, map to DTO. There's a unit test that greps this file for workflow identifiers
@@ -201,8 +202,8 @@ and asserts the function body has no `if`/`raise`/`try`, so nobody accidentally 
 rules into the route later.
 
 **`app/repositories/project_repository.py`** — added `get_member_role`, a single
-SELECT of the member role for a user in a project. The service needs it for the
-OWNER/MANAGER check; repositories only answer queries, they never decide.
+SELECT of the member role for a user in a project. The permission helpers need it
+for the manager check; repositories only answer queries, they never decide.
 
 **`app/schemas/task.py`** — added `in_review` to `TaskStatusValue`. It existed in the
 database enum from Session 1 but was missing from the API enum, so the workflow
