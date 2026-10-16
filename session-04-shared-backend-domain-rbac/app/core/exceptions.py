@@ -91,21 +91,6 @@ class AssigneeNotFoundError(HTTPException):
         )
 
 
-class AssignedByNotFoundError(HTTPException):
-    """Raised when the assigning user cannot be found by ID."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": {
-                    "code": "ASSIGNED_BY_NOT_FOUND",
-                    "message": "Assigning user not found",
-                }
-            },
-        )
-
-
 class InvalidStatusTransitionError(HTTPException):
     """Raised when a task status change violates the allowed workflow."""
 
@@ -125,71 +110,6 @@ class InvalidStatusTransitionError(HTTPException):
                         f"Cannot transition task status from '{current}' to '{target}'. "
                         f"Allowed transitions from '{current}': {allowed_statuses}"
                     ),
-                }
-            },
-        )
-
-
-class MissingUserHeaderError(HTTPException):
-    """Raised when the X-User-ID header identifying the acting user is absent."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": {
-                    "code": "MISSING_USER_HEADER",
-                    "message": "X-User-ID header is required for this operation",
-                }
-            },
-        )
-
-
-class CurrentUserNotFoundError(HTTPException):
-    """Raised when the X-User-ID header does not match any existing user."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": {
-                    "code": "CURRENT_USER_NOT_FOUND",
-                    "message": "Current user not found",
-                }
-            },
-        )
-
-
-class StatusChangeForbiddenError(HTTPException):
-    """Raised when the acting user may not change a task's status (RBAC rule)."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": {
-                    "code": "STATUS_CHANGE_FORBIDDEN",
-                    "message": (
-                        "Only the assignee, a project owner/manager, or an admin "
-                        "can change a task's status"
-                    ),
-                }
-            },
-        )
-
-
-class SimulatedAssignmentFailureError(HTTPException):
-    """Raised when simulating a mid-transaction failure for rollback testing and demo."""
-
-    def __init__(
-        self, message: str = "Simulated mid-transaction failure triggered"
-    ) -> None:
-        super().__init__(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "error": {
-                    "code": "SIMULATED_TRANSACTION_FAILURE",
-                    "message": message,
                 }
             },
         )
@@ -239,6 +159,25 @@ class ForbiddenError(HTTPException):
                 "error": {
                     "code": "FORBIDDEN",
                     "message": message,
+                }
+            },
+        )
+
+
+class StatusChangeForbiddenError(HTTPException):
+    """Raised when the acting user may not change a task's status (RBAC rule)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": {
+                    "code": "STATUS_CHANGE_FORBIDDEN",
+                    "message": (
+                        "Only the assignee, a manager of the project, or an admin "
+                        "can change a task's status; only managers and admins "
+                        "can cancel a task"
+                    ),
                 }
             },
         )
@@ -314,6 +253,23 @@ class AssigneeNotInProjectError(HTTPException):
                 "error": {
                     "code": "ASSIGNEE_NOT_IN_PROJECT",
                     "message": "Assignee must be a member of the task's project",
+                }
+            },
+        )
+
+
+class SimulatedAssignmentFailureError(HTTPException):
+    """Raised when simulating a mid-transaction failure for rollback testing and demo."""
+
+    def __init__(
+        self, message: str = "Simulated mid-transaction failure triggered"
+    ) -> None:
+        super().__init__(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": "SIMULATED_TRANSACTION_FAILURE",
+                    "message": message,
                 }
             },
         )
