@@ -82,6 +82,18 @@ async def test_signup_rejects_duplicate_email(client: AsyncClient):
     assert _error_code(again) == "EMAIL_ALREADY_EXISTS"
 
 
+@pytest.mark.asyncio
+async def test_signup_rejects_username_containing_at_sign(client: AsyncClient):
+    """Login routes any '@' identifier to email lookup, so such usernames
+    could never log in by username."""
+    tag = uuid.uuid4().hex[:8]
+    response = await client.post(
+        "/auth/signup", json=_signup_payload(username=f"user@{tag}")
+    )
+
+    assert response.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # Login
 # ---------------------------------------------------------------------------

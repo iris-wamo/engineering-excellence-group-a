@@ -17,8 +17,13 @@ class UserCreate(BaseModel):
     name: str = Field(
         ..., min_length=1, max_length=255, description="Full name of the user"
     )
+    # No '@': login treats any identifier containing '@' as an email.
     username: str = Field(
-        ..., min_length=3, max_length=50, description="Unique username"
+        ...,
+        min_length=3,
+        max_length=50,
+        pattern=r"^[^@]+$",
+        description="Unique username (must not contain '@')",
     )
     email: EmailStr = Field(..., description="Valid email address")
     password: str = Field(
