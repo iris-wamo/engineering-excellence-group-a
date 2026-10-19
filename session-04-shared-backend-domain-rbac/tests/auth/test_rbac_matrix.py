@@ -362,6 +362,27 @@ async def test_member_creates_tasks_only_for_themselves(
 
 
 @pytest.mark.asyncio
+async def test_only_managers_and_admins_create_cancelled_tasks(
+    client: AsyncClient, world: World
+):
+    def _cancelled(title: str) -> dict:
+        return {"title": title, "project_id": world.project_id, "status": "cancelled"}
+
+    member = await client.post(
+        "/tasks", json=_cancelled("Carol's cancelled"), headers=world.carol.headers
+    )
+    assert member.status_code == 403
+    assert _code(member) == "STATUS_CHANGE_FORBIDDEN"
+
+    for actor in (world.alice, world.admin):
+        res = await client.post(
+            "/tasks", json=_cancelled("Cancelled up front"), headers=actor.headers
+        )
+        assert res.status_code == 201
+        assert res.json()["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
 async def test_task_assignee_must_be_in_the_project(client: AsyncClient, world: World):
     res = await client.post(
         "/tasks",

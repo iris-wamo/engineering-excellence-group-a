@@ -67,8 +67,9 @@ def _transition_error(exc: InvalidTransitionError) -> InvalidStatusTransitionErr
     description=(
         "Creates a task under a project you belong to (404 otherwise). Managers "
         "and admins may assign it to any project member; members can only "
-        "create tasks assigned to themselves (403 for another assignee). The "
-        "assignee must belong to the project (422)."
+        "create tasks assigned to themselves (403 for another assignee) and "
+        "cannot create them as cancelled (403). The assignee must belong to "
+        "the project (422)."
     ),
 )
 async def create_task(

@@ -177,7 +177,8 @@ class TaskService:
 
         Admins and project managers may assign the task to any project member.
         Members may create tasks only for themselves: the task is assigned to
-        them, and naming another assignee is forbidden (403).
+        them, and naming another assignee is forbidden (403). Like the status
+        endpoint, members cannot create a task as ``cancelled`` (403).
         """
         access = await require_project_access(
             db, payload.project_id, actor, not_found=ProjectNotFoundError()
@@ -192,6 +193,8 @@ class TaskService:
                 raise ForbiddenError(
                     "Members can only create tasks assigned to themselves"
                 )
+            if payload.status == TaskStatusValue.CANCELLED:
+                raise StatusChangeForbiddenError()
             assignee_id = actor.id
 
         if assignee_id is not None:
