@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 from typing import Any
+
 from fastapi import APIRouter, Depends, Query, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.api.dependencies.deps import SessionDep
+from app.auth.dependencies import get_current_user, require_admin
 from app.db.mongodb import get_mongo_db
 from app.schemas.import_schema import RawTaskImportRequest, RawTaskImportResponse
 from app.services.import_service import ImportService
 
-router = APIRouter(prefix="/imports/tasks", tags=["Imports"])
+# Imports are admin-only: every route needs a token (401) and the admin role (403).
+router = APIRouter(
+    prefix="/imports/tasks",
+    tags=["Imports"],
+    dependencies=[Depends(get_current_user), Depends(require_admin)],
+)
 
 
 @router.post(

@@ -5,7 +5,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.api.dependencies.deps import CurrentUserDep, PaginationParams, SessionDep
+from app.api.dependencies.deps import PaginationParams, SessionDep
+from app.auth.dependencies import CurrentUserDep, get_current_user
 from app.core.exceptions import InvalidStatusTransitionError
 from app.models.task import TaskStatus
 from app.schemas.task import (
@@ -33,7 +34,11 @@ from app.services.task_service import (
 )
 from app.workflows.task_status_workflow import InvalidTransitionError
 
-router = APIRouter(prefix="/tasks", tags=["Tasks"])
+router = APIRouter(
+    prefix="/tasks",
+    tags=["Tasks"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _status_value(status: TaskStatus) -> str:
@@ -59,15 +64,22 @@ def _transition_error(exc: InvalidTransitionError) -> InvalidStatusTransitionErr
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new task",
-    description="Creates a task under a project. Validates project and optional assignee.",
+    description=(
+        "Creates a task under a project you belong to (404 otherwise). Managers "
+        "and admins may assign it to any project member; members can only "
+        "create tasks assigned to themselves (403 for another assignee) and "
+        "cannot create them as cancelled (403). The assignee must belong to "
+        "the project (422)."
+    ),
 )
 async def create_task(
     payload: TaskCreate,
     db: SessionDep,
     response: Response,
+    current_user: CurrentUserDep,
 ) -> TaskResponse:
     """POST /tasks - Create a new task."""
-    task = await TaskService.create_task(db, payload)
+    task = await TaskService.create_task(db, payload, actor=current_user)
     response.headers["location"] = f"/tasks/{task.id}"
     return to_task_response(task)
 
@@ -77,10 +89,14 @@ async def create_task(
     response_model=TaskListResponse,
     status_code=status.HTTP_200_OK,
     summary="List tasks",
-    description="Paginated task list with optional status, priority, project, and assignee filters.",
+    description=(
+        "Paginated task list with optional status, priority, project, and "
+        "assignee filters. Non-admins only see tasks in their projects."
+    ),
 )
 async def list_tasks(
     db: SessionDep,
+    current_user: CurrentUserDep,
     pagination: PaginationParams = Depends(),
     status_filter: TaskStatusValue | None = Query(
         default=None,
@@ -97,6 +113,7 @@ async def list_tasks(
     """GET /tasks - Paginated and filtered task list."""
     tasks, total = await TaskService.get_tasks(
         db,
+        current_user,
         page=pagination.page,
         page_size=pagination.page_size,
         status=status_filter,
@@ -117,14 +134,17 @@ async def list_tasks(
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
     summary="Get task by ID",
-    description="Fetch a single task by UUID. Returns 404 if missing.",
+    description=(
+        "Fetch a single task by UUID. Returns 404 if missing or outside your projects."
+    ),
 )
 async def get_task(
     task_id: UUID,
     db: SessionDep,
+    current_user: CurrentUserDep,
 ) -> TaskResponse:
     """GET /tasks/{task_id} - Retrieve one task."""
-    task = await TaskService.get_task(db, task_id)
+    task = await TaskService.get_task(db, task_id, current_user)
     return to_task_response(task)
 
 
@@ -134,10 +154,11 @@ async def get_task(
     status_code=status.HTTP_200_OK,
     summary="Update task status",
     description=(
-        "Updates only the task status. Requires X-User-ID header (401 if missing/unknown). "
-        "Only the assignee, a project owner/manager, or an admin may change status (403). "
+        "Updates only the task status. Requires a bearer token (401 if missing/invalid). "
+        "Members may change status only on tasks assigned to them and cannot cancel; "
+        "managers of the project and admins may change any task (403 otherwise). "
         "Transitions must follow todo -> in_progress -> in_review -> done (409 otherwise). "
-        "Returns 404 if the task does not exist."
+        "Returns 404 if the task does not exist or is outside your projects."
     ),
 )
 async def update_task_status(
@@ -164,13 +185,16 @@ async def update_task_status(
     description=(
         "Executes a 5-step transaction-safe task assignment flow: updates assignee/status, "
         "records assignment history, records status history, writes an activity log, "
-        "and creates a notification. If any step fails, the entire transaction rolls back."
+        "and creates a notification. If any step fails, the entire transaction rolls back. "
+        "Managers of the project and admins only; the caller is recorded as the assigner "
+        "and the assignee must belong to the project."
     ),
 )
 async def assign_task(
     task_id: UUID,
     payload: TaskAssignRequest,
     db: SessionDep,
+    current_user: CurrentUserDep,
     simulate_failure: bool = Query(
         default=False,
         description="Simulate a mid-transaction failure for rollback testing",
@@ -194,6 +218,7 @@ async def assign_task(
             db,
             task_id,
             payload,
+            current_user,
             simulate_failure=simulate_failure,
             simulate_failure_step=simulate_failure_step,
         )
@@ -220,9 +245,12 @@ async def assign_task(
 async def get_task_history(
     task_id: UUID,
     db: SessionDep,
+    current_user: CurrentUserDep,
 ) -> dict[str, Any]:
     """GET /tasks/{task_id}/history - Task history."""
-    assignments, statuses = await TaskService.get_task_history(db, task_id)
+    assignments, statuses = await TaskService.get_task_history(
+        db, task_id, current_user
+    )
     return {
         "assignments": [to_assignment_history_response(a) for a in assignments],
         "statuses": [to_status_history_response(s) for s in statuses],
@@ -239,9 +267,10 @@ async def get_task_history(
 async def get_task_activity(
     task_id: UUID,
     db: SessionDep,
+    current_user: CurrentUserDep,
 ) -> list[ActivityLogResponse]:
     """GET /tasks/{task_id}/activity - Task activity logs."""
-    logs = await TaskService.get_task_activity(db, task_id)
+    logs = await TaskService.get_task_activity(db, task_id, current_user)
     return [to_activity_log_response(log) for log in logs]
 
 
@@ -255,7 +284,8 @@ async def get_task_activity(
 async def get_task_notifications(
     task_id: UUID,
     db: SessionDep,
+    current_user: CurrentUserDep,
 ) -> list[NotificationResponse]:
     """GET /tasks/{task_id}/notifications - Task notifications."""
-    notifications = await TaskService.get_task_notifications(db, task_id)
+    notifications = await TaskService.get_task_notifications(db, task_id, current_user)
     return [to_notification_response(n) for n in notifications]

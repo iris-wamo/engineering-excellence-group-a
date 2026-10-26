@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.project_member import ProjectMember
 from app.models.task import Task, TaskStatus
 from app.models.task_assignment_history import TaskAssignmentHistory
 from app.models.task_status_history import TaskStatusHistory
@@ -26,10 +27,24 @@ class TaskRepository:
         *,
         limit: int = 10,
         offset: int = 0,
+        member_user_id: UUID | None = None,
         **filters,
     ) -> tuple[list[Task], int]:
-        """Fetch paginated list of tasks with optional dynamic filters."""
+        """Fetch paginated list of tasks with optional dynamic filters.
+
+        ``member_user_id`` limits the result to tasks in projects that user
+        belongs to.
+        """
         query = select(Task)
+
+        if member_user_id is not None:
+            query = query.where(
+                Task.project_id.in_(
+                    select(ProjectMember.project_id).where(
+                        ProjectMember.user_id == member_user_id
+                    )
+                )
+            )
 
         for key, value in filters.items():
             if value is not None and hasattr(Task, key):

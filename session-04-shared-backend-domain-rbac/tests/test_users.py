@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.api.dependencies.deps import get_db
 from app.core.config import settings
 from app.main import app
+from tests.auth_helpers import admin_headers
 
 
 @pytest_asyncio.fixture
@@ -29,6 +30,8 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        # Default caller: a fresh admin. Tests override per request.
+        ac.headers.update(await admin_headers(test_session_local))
         yield ac
 
     app.dependency_overrides.clear()
@@ -57,7 +60,7 @@ async def test_create_user_success(client: AsyncClient):
     assert response.status_code == 201
     data = response.json()
     assert data["username"] == f"user_{unique_id}"
-    assert data["role"] == "user"
+    assert data["role"] == "member"
     assert "password" not in data
 
 

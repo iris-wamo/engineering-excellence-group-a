@@ -9,6 +9,13 @@ from sqlalchemy.orm import sessionmaker
 from app.api.dependencies.deps import get_db
 from app.core.config import settings
 from app.main import app
+from tests.auth_helpers import (
+    NO_AUTH,
+    add_project_member,
+    admin_headers,
+    bearer,
+    promote_to_manager,
+)
 
 
 @pytest_asyncio.fixture
@@ -29,6 +36,8 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        # Default caller: a fresh admin. Tests override per request.
+        ac.headers.update(await admin_headers(test_session_local))
         yield ac
 
     app.dependency_overrides.clear()
@@ -49,6 +58,7 @@ async def _create_user(client: AsyncClient) -> str:
 
 
 async def _create_project(client: AsyncClient, owner_id: str) -> str:
+    await promote_to_manager(client, owner_id)
     payload = {
         "title": "Task API Project",
         "description": "Project used for task endpoint tests",
@@ -108,7 +118,7 @@ async def test_update_task_status_success(client: AsyncClient):
     update_response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": owner_id},
+        headers=bearer(owner_id),
     )
     assert update_response.status_code == 200
     updated = update_response.json()
@@ -134,7 +144,7 @@ async def test_update_task_status_success(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_update_task_status_requires_user_header(client: AsyncClient):
+async def test_update_task_status_requires_authentication(client: AsyncClient):
     owner_id = await _create_user(client)
     project_id = await _create_project(client, owner_id)
 
@@ -144,28 +154,30 @@ async def test_update_task_status_requires_user_header(client: AsyncClient):
     assert create_response.status_code == 201
     task_id = create_response.json()["id"]
 
-    # Missing X-User-ID header -> 401
+    # Missing bearer token -> 401
     response = await client.patch(
-        f"/tasks/{task_id}/status", json={"status": "in_progress"}
+        f"/tasks/{task_id}/status", json={"status": "in_progress"}, headers=NO_AUTH
     )
     assert response.status_code == 401
-    assert response.json()["detail"]["error"]["code"] == "MISSING_USER_HEADER"
+    assert response.json()["detail"]["error"]["code"] == "UNAUTHORIZED"
 
-    # Unknown user in header -> 401
+    # Valid token for a user that does not exist -> 401
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": str(uuid.uuid4())},
+        headers=bearer(str(uuid.uuid4())),
     )
     assert response.status_code == 401
-    assert response.json()["detail"]["error"]["code"] == "CURRENT_USER_NOT_FOUND"
+    assert response.json()["detail"]["error"]["code"] == "UNAUTHORIZED"
 
 
 @pytest.mark.asyncio
 async def test_update_task_status_forbidden_for_unrelated_user(client: AsyncClient):
     owner_id = await _create_user(client)
+    teammate_id = await _create_user(client)
     stranger_id = await _create_user(client)
     project_id = await _create_project(client, owner_id)
+    await add_project_member(client, project_id, teammate_id)
 
     create_response = await client.post(
         "/tasks",
@@ -178,14 +190,23 @@ async def test_update_task_status_forbidden_for_unrelated_user(client: AsyncClie
     assert create_response.status_code == 201
     task_id = create_response.json()["id"]
 
-    # Stranger is not assignee, not project owner, not a member -> 403
+    # Teammate is in the project but not the assignee or a manager -> 403
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "in_progress"},
-        headers={"X-User-ID": stranger_id},
+        headers=bearer(teammate_id),
     )
     assert response.status_code == 403
     assert response.json()["detail"]["error"]["code"] == "STATUS_CHANGE_FORBIDDEN"
+
+    # Stranger is not in the project at all -> the task is invisible (404)
+    response = await client.patch(
+        f"/tasks/{task_id}/status",
+        json={"status": "in_progress"},
+        headers=bearer(stranger_id),
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"]["code"] == "TASK_NOT_FOUND"
 
 
 @pytest.mark.asyncio
@@ -208,7 +229,7 @@ async def test_update_task_status_invalid_transition_conflict(client: AsyncClien
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "done"},
-        headers={"X-User-ID": owner_id},
+        headers=bearer(owner_id),
     )
     assert response.status_code == 409
     error = response.json()["detail"]["error"]
@@ -239,7 +260,7 @@ async def test_task_status_full_workflow(client: AsyncClient):
         response = await client.patch(
             f"/tasks/{task_id}/status",
             json={"status": next_status},
-            headers={"X-User-ID": owner_id},
+            headers=bearer(owner_id),
         )
         assert response.status_code == 200, response.text
         assert response.json()["status"] == next_status
@@ -248,7 +269,7 @@ async def test_task_status_full_workflow(client: AsyncClient):
     response = await client.patch(
         f"/tasks/{task_id}/status",
         json={"status": "todo"},
-        headers={"X-User-ID": owner_id},
+        headers=bearer(owner_id),
     )
     assert response.status_code == 409
 
