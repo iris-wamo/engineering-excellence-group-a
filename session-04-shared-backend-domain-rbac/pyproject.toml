@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "taskflow-shared==0.1.0",
     "alembic>=1.18.5",
     "asyncpg>=0.31.0",
     "email-validator>=2.3.0",
@@ -19,6 +20,9 @@ dependencies = [
     "sqlalchemy>=2.0.51",
     "uvicorn>=0.51.0",
 ]
+
+[tool.uv.sources]
+taskflow-shared = { url = "https://github.com/husnainmazhar45/taskflow-shared/archive/82b2360ff5958b9a5f45d27d2e939ed8c73a1f3e.tar.gz" }
 
 [dependency-groups]
 dev = [

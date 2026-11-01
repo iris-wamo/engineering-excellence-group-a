@@ -1,4 +1,4 @@
-# TaskFlow API - Session 03: Database Transactions & Migrations
+# TaskFlow API — Session 4: Shared Foundations, Domain Workflows & RBAC
 
 Engineering Excellence Program — TaskFlow Backend MVP focusing on database correctness, transactions, schema migrations, and query performance.
 
@@ -11,6 +11,34 @@ Session 3 shifts focus deep into the database layer of the TaskFlow application 
 - **ORM Query Efficiency**: Eliminating N+1 queries and controlling lazy vs eager loading behavior.
 - **Concurrency & Locking**: Understanding row-level locks, transaction isolation, and deadlock prevention.
 - **MongoDB Raw Payload Store**: Document storage for raw import payloads and traceability.
+
+---
+
+
+## Shared Backend Package
+
+The application installs `taskflow-shared` from an immutable source archive at commit `82b2360ff5958b9a5f45d27d2e939ed8c73a1f3e`. The dependency source is declared in `pyproject.toml` and verified by `uv.lock`. Standard setup needs no separate package checkout:
+
+```bash
+uv sync --locked
+make demo-shared
+make test-foundations
+```
+
+The package supplies base settings, common error contracts, validated pagination, identifier/timestamp response fields, infrastructure enums, and request tracing. Task policies, JWT authentication, RBAC, database models, and transactions remain app-owned.
+
+```python
+from taskflow_shared.pagination import PaginationParams
+
+pagination = PaginationParams(page=2, page_size=10)
+assert pagination.offset == 10
+```
+
+Run `make run` (or `uv run uvicorn app.main:application`) to serve the outer ASGI wrapper. It adds `X-Request-ID` to successful and error responses while preserving the existing bearer-token protections. The inner `app.main:app` remains available for route registration, OpenAPI, and dependency overrides in tests.
+
+`make test-foundations` exercises the real HTTP adapters with isolated dependencies and requires no database services. Valid app settings are still required; the test setup supplies a test-only JWT key. The full application suite remains `make test`, using a migrated, dedicated test database. The standalone package's tests run in its own repository.
+
+See [package integration](docs/shared-package-notes.md), [layer ownership](docs/architecture-boundaries.md), [testing strategy](docs/testing-strategy.md), and the [written demo](demos/01-shared-package/demo.md). Optional package development instructions are in [packages/README.md](packages/README.md).
 
 ---
 
@@ -30,7 +58,7 @@ Session 3 shifts focus deep into the database layer of the TaskFlow application 
 
 Navigate to the directory:
 ```bash
-cd session-03-db-transactions-migrations
+cd session-04-shared-backend-domain-rbac
 ```
 
 Install dependencies using `uv`:
@@ -67,7 +95,7 @@ uv run alembic upgrade head
 ### 3. Start the Application
 
 ```bash
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn app.main:application --reload --host 0.0.0.0 --port 8000
 ```
 
 Access API Documentation:

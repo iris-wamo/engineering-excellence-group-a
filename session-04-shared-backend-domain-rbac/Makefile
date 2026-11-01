@@ -25,7 +25,7 @@ precommit:
 	uv run pre-commit run --all-files
 
 run:
-	uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	uv run uvicorn app.main:application --reload --host 0.0.0.0 --port 8000
 
 migrate:
 	uv run alembic upgrade head
@@ -80,3 +80,11 @@ docker-logs:
 
 docker-migrate:
 	docker compose exec api uv run alembic upgrade head
+
+.PHONY: demo-shared test-foundations
+
+demo-shared:
+	uv run python -m scripts.demo_shared_package
+
+test-foundations:
+	uv run pytest tests/integration/test_shared_foundations.py

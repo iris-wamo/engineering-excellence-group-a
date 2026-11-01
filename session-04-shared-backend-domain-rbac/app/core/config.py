@@ -1,18 +1,10 @@
 from __future__ import annotations
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from taskflow_shared.config import BaseAppConfig
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
-    APP_NAME: str = "TaskFlow API"
-    ENVIRONMENT: str = Field("development", alias="APP_ENV")
+class Settings(BaseAppConfig):
     DB_USER: str = Field(..., alias="POSTGRES_USER")
     DB_PASSWORD: str = Field(..., alias="POSTGRES_PASSWORD")
     DB_HOST: str = Field("localhost", alias="POSTGRES_HOST")

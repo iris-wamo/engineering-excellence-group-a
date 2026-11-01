@@ -13,8 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.exceptions import HTTPException
 
 from app.auth.roles import ProjectRole, UserRole
 from app.core.exceptions import ForbiddenError
