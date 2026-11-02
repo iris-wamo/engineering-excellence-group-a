@@ -39,3 +39,15 @@ Raw third-party task import payloads must remain 100% traceable through MongoDB.
 - **100% Payload Retention**: Every incoming import request is captured in MongoDB collection `raw_task_imports` before relational validation occurs.
 - **Traceable Error State**: Validation or database lookup failures record `processed_status = "failed"` along with the exact exception text (`error_message`) without discarding the original payload.
 - **Relational Linkage**: Successful imports record `processed_status = "success"` and store the linked PostgreSQL `postgres_task_id` UUID.
+
+
+## Shared Package Integration SLOs
+
+- Install all six shared helper modules from the exact source revision in `pyproject.toml` and `uv.lock`, without requiring a local package checkout.
+- All three list endpoints use the common paginated response and retain 422 responses for invalid pagination values.
+- Common error-envelope construction and pagination offset calculations have one shared implementation.
+- Requests served through `app.main:application` include `X-Request-ID` on successful and error responses.
+- Existing bearer-token protections, role policies, domain workflows, and persistence behavior remain in the application.
+- Foundation HTTP compatibility tests run with isolated dependencies and no database connection.
+
+Evidence is maintained in [package notes](shared-package-notes.md), [testing strategy](testing-strategy.md), and the [written demo](../demos/01-shared-package/demo.md).

@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from taskflow_shared.pagination import PaginatedResponse
 
 from app.auth.roles import UserRole
 
@@ -58,10 +59,5 @@ class UserResponse(BaseModel):
     role: UserRole
 
 
-class UserListResponse(BaseModel):
+class UserListResponse(PaginatedResponse[UserResponse]):
     """Paginated list response wrapper for users."""
-
-    items: list[UserResponse]
-    page: int = Field(..., ge=1, description="Current page number")
-    page_size: int = Field(..., ge=1, le=100, description="Items per page")
-    total: int = Field(..., ge=0, description="Total matching users count")

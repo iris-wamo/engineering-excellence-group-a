@@ -5,6 +5,8 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from taskflow_shared.contracts import IdentifiableSchema, TimestampedSchema
+from taskflow_shared.pagination import PaginatedResponse
 
 
 class TaskStatusValue(enum.StrEnum):
@@ -51,12 +53,11 @@ class TaskStatusUpdate(BaseModel):
     status: TaskStatusValue
 
 
-class TaskResponse(BaseModel):
+class TaskResponse(IdentifiableSchema, TimestampedSchema):
     """Response DTO for a single task."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
     title: str
     description: str | None
     priority: TaskPriorityValue
@@ -65,17 +66,10 @@ class TaskResponse(BaseModel):
     assignee_id: UUID | None
     estimated_time: int | None
     deadline: datetime | None
-    created_at: datetime
-    updated_at: datetime
 
 
-class TaskListResponse(BaseModel):
+class TaskListResponse(PaginatedResponse[TaskResponse]):
     """Paginated list response for tasks."""
-
-    items: list[TaskResponse]
-    page: int = Field(..., ge=1)
-    page_size: int = Field(..., ge=1, le=100)
-    total: int = Field(..., ge=0)
 
 
 class TaskAssignRequest(BaseModel):

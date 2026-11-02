@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from taskflow_shared.pagination import PaginatedResponse
 
 from app.auth.roles import ProjectRole
 from app.models.project import ProjectPriority, ProjectStatus
@@ -59,10 +60,5 @@ class ProjectResponse(BaseModel):
     owner_id: UUID
 
 
-class ProjectListResponse(BaseModel):
+class ProjectListResponse(PaginatedResponse[ProjectResponse]):
     """Paginated list response wrapper for projects."""
-
-    items: list[ProjectResponse]
-    page: int = Field(..., ge=1, description="Current page number")
-    page_size: int = Field(..., ge=1, le=100, description="Items per page")
-    total: int = Field(..., ge=0, description="Total matching projects count")

@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from taskflow_shared.pagination import PaginationParams
 
 from app.auth.permissions import (
     is_admin,
@@ -231,7 +232,7 @@ class TaskService:
         assignee_id: UUID | None = None,
     ) -> tuple[list[Task], int]:
         """Fetch tasks; non-admins only see tasks in projects they belong to."""
-        offset = (page - 1) * page_size
+        offset = PaginationParams(page=page, page_size=page_size).offset
         return await TaskRepository.get_all(
             db,
             limit=page_size,

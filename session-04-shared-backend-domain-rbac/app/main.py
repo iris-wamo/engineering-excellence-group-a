@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from taskflow_shared.logging import RequestIDMiddleware
 
 from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.imports import router as imports_router
@@ -24,3 +25,7 @@ app.include_router(imports_router)
 @app.get("/health", tags=["health"])
 def health_check():
     return {"status": "ok"}
+
+
+# Wrap outside FastAPI error handling so unexpected failures also carry a request ID.
+application = RequestIDMiddleware(app)

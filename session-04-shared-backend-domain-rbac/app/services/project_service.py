@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from taskflow_shared.pagination import PaginationParams
 
 from app.auth.permissions import (
     is_admin,
@@ -107,7 +108,7 @@ class ProjectService:
         owner_id: UUID | None = None,
     ) -> tuple[list[Project], int]:
         """Admins see every project; everyone else sees projects they belong to."""
-        offset = (page - 1) * page_size
+        offset = PaginationParams(page=page, page_size=page_size).offset
 
         return await ProjectRepository.get_all(
             db,

@@ -17,16 +17,16 @@ session-04-shared-backend-domain-rbac/
 │   │   ├── dependencies/           # Global FastAPI dependencies (DB session, pagination)
 │   │   └── v1/
 │   │       └── routes/             # Versioned REST API endpoints (users, projects, tasks, imports)
-│   ├── auth/                       # Auth & RBAC boundary (Reserved for Task 5: Auth/RBAC)
+│   ├── auth/                       # JWT authentication and RBAC policies
 │   ├── services/                   # Application Orchestration Services
-│   ├── workflows/                  # Domain Workflows boundary (Reserved for Task 3: Domain Workflows)
+│   ├── workflows/                  # Task status transition rules
 │   ├── repositories/               # Data Access Repositories (PostgreSQL ORM / SQL)
 │   ├── models/                     # SQLAlchemy Database Entities
 │   ├── schemas/                    # Pydantic DTOs (Request / Response validation)
 │   ├── db/                         # Database connection engines (Postgres async session & Motor MongoDB)
 │   └── core/                       # Global environment settings & configuration
-├── packages/                       # Shared packages boundary (Reserved for Another Task: Shared Package)
-│   └── taskflow_shared/            # Installable local shared Python package
+├── packages/                       # Optional development checkout of the external shared package
+│   └── taskflow_shared/            # Independent package checkout; normal installation uses the pinned dependency
 │       ├── pyproject.toml          # Standalone package definition
 │       └── taskflow_shared/        # Shared cross-cutting modules (config, errors, pagination, logging)
 ├── tests/                          # Reusable Pytest suite
@@ -39,7 +39,7 @@ session-04-shared-backend-domain-rbac/
 │   ├── shared-package-notes.md     # Shared package design & usage guidelines
 │   ├── workflow-design.md          # Task status transition & domain workflow rules
 │   └── rbac-authorization-matrix.md# Role -> Resource -> Allowed/Forbidden matrix
-├── demos/                          # Interactive demo walkthroughs & loom scripts
+├── demos/                          # Executable and written demo walkthroughs
 └── README.md                       # Setup, test, and execution instructions
 ```
 
@@ -107,7 +107,7 @@ session-04-shared-backend-domain-rbac/
   - Invoke repository methods (`TaskRepository.create()`, `UserRepository.get_by_id()`).
   - Perform transaction management across multiple repository operations.
 * **Forbidden Anti-Patterns**:
-  -  **NO HTTP concepts**: Services/workflows must never import `Request`, `Response`, `APIRouter`, or raise FastAPI `HTTPException` directly. Use domain exceptions (e.g., `InvalidStateTransitionError`, `EntityNotFoundError`).
+  - **Keep HTTP routing out of services/workflows**: services do not accept HTTP request/response objects or define routes. Existing resource/auth exceptions remain HTTP-compatible adapters backed by the shared error contract; the task-transition workflow raises transport-independent domain errors that routes translate.
 
 ---
 
@@ -129,7 +129,7 @@ session-04-shared-backend-domain-rbac/
 
 ---
 
-### 6. Shared Infrastructure Package (`packages/taskflow_shared/`) {Proposed}
+### 6. Shared Infrastructure Package (`taskflow_shared`)
 * **Responsibility**: Standalone, installable python package for cross-cutting infrastructure concerns shared across microservices or sub-packages.
 * **Included Components**:
   - Standard base settings & environment loader (`taskflow_shared.config`).
@@ -146,7 +146,16 @@ session-04-shared-backend-domain-rbac/
 
 | Layer / Concern | Before Refactoring (Session 1-3) | After Refactoring (Session 4 Baseline) |
 | :--- | :--- | :--- |
-| **Auth Dependencies** | Scattered inside `api/dependencies/deps.py` | Will be Isolated in dedicated `app/auth/dependencies.py` |
+| **Auth Dependencies** | Scattered inside `api/dependencies/deps.py` | Isolated in `app/auth/dependencies.py` |
 | **Domain Workflows** | Embedded inside generic service functions | Separated into `app/workflows/` state machine engines |
-| **Shared Helpers** | Duplicated across app subfolders |WIll be centralized in installable `packages/taskflow_shared/` |
+| **Shared Helpers** | Duplicated across app subfolders |Centralized in the installed external `taskflow_shared` dependency |
 
+
+
+## Shared Package Extraction: Before and After
+
+Before integration, settings owned generic environment parsing, resource exceptions repeated error-envelope construction, list schemas repeated pagination fields, and services repeated offset calculations. Request correlation was not registered at the application boundary.
+
+After integration, `taskflow_shared` supplies those common helpers through an immutable external dependency. The app retains database/JWT configuration, resource error codes/messages, HTTP query binding, task-specific schemas/enums, workflow rules, and persistence. `TaskResponse` inherits shared identifier/timestamp contracts. `app.main:application` wraps FastAPI for response tracing while the inner app owns routes and dependency overrides.
+
+The source revision is declared in `pyproject.toml` and locked in `uv.lock`; a nested checkout is optional. Dependencies point from the application to the package, never the reverse. See [package notes](shared-package-notes.md) for the exact module mapping and compatibility decisions.

@@ -360,6 +360,7 @@ dependencies = [
     { name = "pymongo" },
     { name = "python-multipart" },
     { name = "sqlalchemy" },
+    { name = "taskflow-shared" },
     { name = "uvicorn" },
 ]
 
@@ -387,6 +388,7 @@ requires-dist = [
     { name = "pymongo", specifier = ">=4.10.0" },
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "sqlalchemy", specifier = ">=2.0.51" },
+    { name = "taskflow-shared", url = "https://github.com/husnainmazhar45/taskflow-shared/archive/82b2360ff5958b9a5f45d27d2e939ed8c73a1f3e.tar.gz" },
     { name = "uvicorn", specifier = ">=0.51.0" },
 ]
 
@@ -1199,6 +1201,30 @@ sdist = { url = "https://files.pythonhosted.org/packages/eb/e3/7c1dc7381d9f8ab7d
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/bb/2799cc2ede3ed41131f8975621e7213dfc7ef4acbbaadfa440f32500c370/starlette-1.3.1-py3-none-any.whl", hash = "sha256:c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6", size = 73632, upload-time = "2026-06-12T09:23:10.017Z" },
 ]
+
+[[package]]
+name = "taskflow-shared"
+version = "0.1.0"
+source = { url = "https://github.com/husnainmazhar45/taskflow-shared/archive/82b2360ff5958b9a5f45d27d2e939ed8c73a1f3e.tar.gz" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "starlette" },
+]
+sdist = { hash = "sha256:a5b47d4352e360ad70da754edeea0d8349f1960cc5cb22603a170186a3ca2abd" }
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27.0" },
+    { name = "mypy", marker = "extra == 'test'", specifier = ">=1.18.2" },
+    { name = "pydantic", specifier = ">=2.11.0,<3" },
+    { name = "pydantic-settings", specifier = ">=2.0.0,<3" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23.0" },
+    { name = "ruff", marker = "extra == 'test'", specifier = ">=0.16.1" },
+    { name = "starlette", specifier = ">=0.30.0" },
+]
+provides-extras = ["test"]
 
 [[package]]
 name = "typing-extensions"
