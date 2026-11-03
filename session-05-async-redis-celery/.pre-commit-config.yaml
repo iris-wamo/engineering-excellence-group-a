@@ -1,0 +1,45 @@
+# Pre-commit hooks for session-05-async-redis-celery.
+#
+# Installed automatically by `make install` (or `make hooks`).
+# - pre-commit: every commit touching this session is blocked until ruff + mypy pass.
+# - pre-push:   every push touching this session is blocked until pytest passes
+#               (needs .env plus PostgreSQL/MongoDB running, e.g. `make docker-up`).
+#
+# Hooks run through `uv run` so they use the exact tool versions pinned in
+# uv.lock and can resolve project dependencies (e.g. taskflow-shared).
+# Paths in `files` are relative to the git repository root.
+
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (session-05)
+        entry: bash -c 'cd session-05-async-redis-celery && uv run ruff check --fix .'
+        language: system
+        files: ^session-05-async-redis-celery/.*\.py$
+        pass_filenames: false
+
+      - id: ruff-format
+        name: ruff format (session-05)
+        entry: bash -c 'cd session-05-async-redis-celery && uv run ruff format .'
+        language: system
+        files: ^session-05-async-redis-celery/.*\.py$
+        pass_filenames: false
+
+      - id: mypy
+        name: mypy (session-05)
+        entry: bash -c 'cd session-05-async-redis-celery && uv run mypy app'
+        language: system
+        files: ^session-05-async-redis-celery/.*\.py$
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest (session-05)
+        entry: bash -c 'cd session-05-async-redis-celery && uv run pytest -q'
+        language: system
+        files: ^session-05-async-redis-celery/
+        pass_filenames: false
+        stages: [pre-push]
