@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid5
 
 from seeds.projects import PROJECT_1_ID, PROJECT_2_ID
@@ -31,6 +31,7 @@ STATUS_HISTORY_2_ID = UUID("dddd2222-2222-2222-2222-222222222222")
 # ---------------------------------------------------------------------------
 
 NOW = datetime.utcnow()
+NOW_TZ = datetime.now(UTC)
 
 BASE_TASKS = [
     {
@@ -44,6 +45,7 @@ BASE_TASKS = [
         "status": "IN_PROGRESS",
         "estimated_time": 480,
         "deadline": NOW + timedelta(days=7),
+        "due_date": NOW_TZ - timedelta(days=3),  # overdue
         "created_at": NOW,
         "updated_at": NOW,
     },
@@ -58,6 +60,7 @@ BASE_TASKS = [
         "status": "TODO",
         "estimated_time": 360,
         "deadline": NOW + timedelta(days=10),
+        "due_date": NOW_TZ + timedelta(days=2),  # due soon
         "created_at": NOW,
         "updated_at": NOW,
     },
@@ -72,6 +75,7 @@ BASE_TASKS = [
         "status": "IN_REVIEW",
         "estimated_time": 240,
         "deadline": NOW + timedelta(days=5),
+        "due_date": None,  # no due date
         "created_at": NOW,
         "updated_at": NOW,
     },
@@ -121,11 +125,22 @@ def performance_task_id(index: int) -> UUID:
     )
 
 
+def _performance_due_date(i: int, now_tz: datetime) -> datetime | None:
+    """Spread due dates across overdue, due-soon, and null buckets."""
+    bucket = i % 3
+    if bucket == 0:
+        return now_tz - timedelta(days=(i % 14) + 1)  # overdue
+    if bucket == 1:
+        return now_tz + timedelta(days=(i % 7) + 1)  # due soon / future
+    return None  # no due date
+
+
 def generate_performance_tasks(
     count: int = PERFORMANCE_TASK_COUNT,
 ) -> list[dict]:
     """Generate deterministic tasks for query-performance testing."""
     now = datetime.utcnow()
+    now_tz = datetime.now(UTC)
 
     tasks = []
 
@@ -149,6 +164,7 @@ def generate_performance_tasks(
                 "status": status,
                 "estimated_time": 30 + (i % 480),
                 "deadline": now + timedelta(days=i % 30),
+                "due_date": _performance_due_date(i, now_tz),
                 "created_at": created_at,
                 "updated_at": created_at,
             }
