@@ -1,4 +1,4 @@
-.PHONY: install hooks lint lint-fix format typecheck type-check test pre-commit precommit run migrate quality docker-up docker-down docker-test docker-logs docker-migrate seed-rbac create-admin
+.PHONY: install hooks lint lint-fix format typecheck type-check test pre-commit precommit run migrate quality docker-up docker-down docker-test docker-logs docker-migrate redis-cli seed-rbac create-admin
 
 install:
 	uv sync
@@ -77,7 +77,7 @@ docker-test:
 	docker compose --profile test run --rm test
 
 docker-logs:
-	docker compose logs -f api postgres
+	docker compose logs -f api postgres redis
 
 docker-migrate:
 	docker compose exec api uv run alembic upgrade head
@@ -89,3 +89,6 @@ demo-shared:
 
 test-foundations:
 	uv run pytest tests/integration/test_shared_foundations.py
+
+redis-cli:
+	docker compose exec redis redis-cli
