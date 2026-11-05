@@ -49,8 +49,9 @@ Read `app/core/redis.py` alongside `app/main.py`:
 2. `Redis.from_url(...)` creates the client and its internally owned connection
    pool. It does not immediately connect to the server.
 3. `await client.ping()` makes the initial connection and verifies readiness.
-   Startup fails if Redis cannot be reached. Socket/connect timeouts are set to
-   five seconds; library retries may make total failure time longer.
+   Startup fails if Redis cannot be reached. An `asyncio.timeout(5)` deadline
+   bounds the readiness ping, including connection setup and retries. Cleanup
+   runs after that deadline and can add time before startup exits.
 4. `app.state.redis = client` exposes this instance to the app's requests.
 5. `yield` hands control to FastAPI to serve requests.
 6. On shutdown, `finally` clears the reference and `await client.aclose()` closes
@@ -59,6 +60,32 @@ Read `app/core/redis.py` alongside `app/main.py`:
 `decode_responses=True` returns text for normal string reads instead of bytes.
 One shared client means one pool per API process, not one TCP connection for the
 whole deployment. Multiple Uvicorn worker processes each own their own client.
+
+### Command waits and deadlines
+
+`socket_connect_timeout=5` bounds connection establishment. `socket_timeout=None`
+allows commands such as `BLPOP(timeout=8)` and `XREAD BLOCK` to intentionally
+wait longer than five seconds. A fixed five-second socket timeout would interrupt
+these healthy waits with a client-side timeout.
+
+`health_check_interval=30` enables a PING before a command when a connection is
+due for a health check. This is not a background poll every 30 seconds and does
+not impose a response deadline on an in-flight command.
+
+Request handlers should bound Redis operations with an application deadline:
+
+```python
+import asyncio
+
+async with asyncio.timeout(2):
+    value = await redis.get("taskflow:summary")
+```
+
+The feature must decide how to handle `TimeoutError`, such as falling back to
+PostgreSQL for an optional cache. Consumers should use finite server-side waits
+and application deadlines appropriate to their processing and shutdown needs.
+Long-running consumers can also use separate pools to isolate their connections
+from request traffic. S5-01 does not implement consumer loops or cache fallbacks.
 
 ## 4. How later endpoints reuse it
 
@@ -134,11 +161,12 @@ make test
 ```
 
 Run `uv run python -m scripts.demo_redis` for a repeatable real-server check.
-It verifies PING, shared-client reuse, SET/GET, TTL, and shutdown, and removes
-its unique demo key.
+It verifies PING, shared-client reuse, SET/GET, TTL, an eight-second BLPOP on an
+empty unique key, continued client usability, and shutdown. It removes its demo
+key. The BLPOP check guards against reintroducing a shorter socket timeout.
 
-The three lifecycle tests cover reuse and normal shutdown, failed startup, and
-cleanup when an exception escapes the running lifespan. They use a fake client;
+The lifecycle tests cover reuse and normal shutdown, failed startup, a stalled
+startup ping, and cleanup when an exception escapes the running lifespan. They use a fake client;
 the CLI demo and a real-server lifespan check verify network connectivity.
 
 The full existing suite also needs PostgreSQL, MongoDB, and a migrated dedicated
@@ -148,11 +176,12 @@ a container. Do not point integration tests at production data.
 
 ## Verified result
 
-- Full suite: **215 passed**, including the three new lifecycle tests.
+- Full suite: **216 passed**, including four lifecycle tests.
 - Ruff lint and formatting, mypy, and `uv lock --check`: passed.
 - Compose configuration validation: passed.
 - Real `redis:7-alpine` service: healthy; CLI `PING` returned `PONG`.
-- `scripts.demo_redis`: shared-client reuse, SET/GET, TTL, deletion, and shutdown passed.
+- `scripts.demo_redis`: shared-client reuse, SET/GET, TTL, an eight-second blocking
+  read returning None, deletion, and shutdown passed.
 
 Local verification used an isolated PostgreSQL container named
 `s5-01-redis-test-db` on host port `15432`, migrated to head, plus the existing

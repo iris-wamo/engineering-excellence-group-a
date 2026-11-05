@@ -1,6 +1,7 @@
 """Exercise the shared client against real Redis: uv run python -m scripts.demo_redis."""
 
 import asyncio
+from time import monotonic
 from uuid import uuid4
 
 from starlette.requests import Request
@@ -22,6 +23,15 @@ async def main() -> None:
             ttl = await client.ttl(key)
             assert 0 < ttl <= 30
             print(f"PING OK; shared client reused; SET/GET OK; TTL={ttl}s")
+            # Regression: the former 5s socket timeout interrupted this 8s wait.
+            started = monotonic()
+            async with asyncio.timeout(15):
+                result = await client.blpop([f"{key}:empty"], timeout=8)
+            elapsed = monotonic() - started
+            assert result is None
+            assert elapsed >= 8
+            assert await client.ping()
+            print(f"BLPOP waited {elapsed:.1f}s and returned None; client still usable")
         finally:
             await client.delete(key)
     assert app.state.redis is None

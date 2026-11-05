@@ -1,5 +1,6 @@
 """One async Redis client and connection pool per running API process."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -16,10 +17,14 @@ async def redis_lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.REDIS_URL,
         decode_responses=True,
         socket_connect_timeout=5,
-        socket_timeout=5,
+        # Blocking commands use their own server-side wait, which can exceed 5s.
+        socket_timeout=None,
+        health_check_interval=30,
     )
     try:
-        await client.ping()
+        # Bound readiness separately from the shared client's command behavior.
+        async with asyncio.timeout(5):
+            await client.ping()
         app.state.redis = client
         yield
     finally:
@@ -28,7 +33,7 @@ async def redis_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def get_redis(request: Request) -> Redis:
-    """FastAPI dependency returning the client owned by this app's lifespan."""
+    """Return the shared client; callers should bound request-path operations."""
     client = getattr(request.app.state, "redis", None)
     if client is None:
         raise RuntimeError("Redis client is unavailable; run the app lifespan first")
