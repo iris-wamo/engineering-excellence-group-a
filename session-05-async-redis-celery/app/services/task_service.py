@@ -44,6 +44,7 @@ from app.schemas.task import (
     TaskStatusHistoryResponse,
     TaskStatusUpdate,
     TaskStatusValue,
+    TaskUpdate,
 )
 from app.workflows.task_status_workflow import TaskStatusWorkflow
 
@@ -77,6 +78,7 @@ def to_task_response(task: Task) -> TaskResponse:
         assignee_id=task.assigned_to,
         estimated_time=task.estimated_time,
         deadline=task.deadline,
+        due_date=task.due_date,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -217,6 +219,7 @@ class TaskService:
             assigned_by=actor.id if assignee_id is not None else None,
             estimated_time=payload.estimated_time,
             deadline=deadline,
+            due_date=payload.due_date,
         )
 
     @staticmethod
@@ -254,6 +257,23 @@ class TaskService:
             db, task.project_id, actor, not_found=TaskNotFoundError()
         )
         return task
+
+    @staticmethod
+    async def update_task(
+        db: AsyncSession, task_id: UUID, payload: TaskUpdate, actor: User
+    ) -> Task:
+        """Let project managers and admins set or clear a task's due date."""
+        task = await TaskRepository.get_by_id(db, task_id)
+        if task is None:
+            raise TaskNotFoundError()
+
+        await require_project_manager(
+            db, task.project_id, actor, not_found=TaskNotFoundError()
+        )
+        changes = payload.model_dump(exclude_unset=True)
+        if not changes:
+            return task
+        return await TaskRepository.update(db, task, **changes)
 
     @staticmethod
     async def _ensure_can_change_status(

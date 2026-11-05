@@ -22,6 +22,7 @@ from app.schemas.task import (
     TaskStatusHistoryResponse,
     TaskStatusUpdate,
     TaskStatusValue,
+    TaskUpdate,
 )
 from app.services.task_service import (
     TaskService,
@@ -145,6 +146,29 @@ async def get_task(
 ) -> TaskResponse:
     """GET /tasks/{task_id} - Retrieve one task."""
     task = await TaskService.get_task(db, task_id, current_user)
+    return to_task_response(task)
+
+
+@router.patch(
+    "/{task_id}",
+    response_model=TaskResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update task due date",
+    description=(
+        "Admins and project managers may set or clear due_date (403 for members). "
+        "Include a timezone when setting a date; null clears it, and omission "
+        "keeps it unchanged. Past dates are allowed on update. Returns 404 for "
+        "missing tasks or users outside the project. Use /status for status changes."
+    ),
+)
+async def update_task(
+    task_id: UUID,
+    payload: TaskUpdate,
+    db: SessionDep,
+    current_user: CurrentUserDep,
+) -> TaskResponse:
+    """PATCH /tasks/{task_id} - Set or clear the due date as an authorized manager."""
+    task = await TaskService.update_task(db, task_id, payload, actor=current_user)
     return to_task_response(task)
 
 

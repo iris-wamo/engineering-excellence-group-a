@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 from taskflow_shared.contracts import IdentifiableSchema, TimestampedSchema
 from taskflow_shared.pagination import PaginatedResponse
 
@@ -45,6 +45,22 @@ class TaskCreate(BaseModel):
         description="Estimated effort in hours",
     )
     deadline: datetime | None = None
+    due_date: AwareDatetime | None = None
+
+    @field_validator("due_date")
+    @classmethod
+    def reject_past_due_date(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value < datetime.now(UTC):
+            raise ValueError("due_date must not be in the past")
+        return value
+
+
+class TaskUpdate(BaseModel):
+    """Partial due-date update: omission keeps the value; null clears it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    due_date: AwareDatetime | None = None
 
 
 class TaskStatusUpdate(BaseModel):
@@ -66,6 +82,7 @@ class TaskResponse(IdentifiableSchema, TimestampedSchema):
     assignee_id: UUID | None
     estimated_time: int | None
     deadline: datetime | None
+    due_date: AwareDatetime | None = None
 
 
 class TaskListResponse(PaginatedResponse[TaskResponse]):

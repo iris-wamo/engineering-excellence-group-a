@@ -59,6 +59,9 @@ class Task(Base):
     )
     estimated_time: Mapped[int | None] = mapped_column(Integer, nullable=True)
     deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    due_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
