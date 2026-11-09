@@ -23,3 +23,10 @@ Take the Session 01 API and harden it for team development. This session covers:
 * An entrypoint script that runs migrations before the API starts, so the container can't come up against a stale schema.
 
 See `session-02-dockerized-development-and-code-review-standards/README.md` for setup instructions.
+
+### Session 05 — Async, Redis & Celery (`session-05-async-redis-celery/`)
+
+Builds on Session 4. S5-01 adds a healthchecked Redis service, persistent named
+volume, and a shared async Redis client managed by FastAPI's lifespan.
+See [Session 5 setup](session-05-async-redis-celery/README.md) and the
+[Redis walkthrough](session-05-async-redis-celery/docs/s5-01-redis.md).
