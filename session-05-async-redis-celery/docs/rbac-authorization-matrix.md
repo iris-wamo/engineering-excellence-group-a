@@ -40,6 +40,7 @@ enforced server-side and covered by `tests/auth/`.
 | Tasks | Create a task | `POST /tasks` | Yes | Their projects | Their projects, assigned to themselves |
 | Tasks | List / view tasks | `GET /tasks`, `GET /tasks/{id}` | All | Their projects | Their projects |
 | Tasks | Assign or reassign | `POST /tasks/{id}/assign` | Yes | Their projects | No |
+| Tasks | Set or clear due date | `PATCH /tasks/{id}` | Yes | Their projects | No |
 | Tasks | Change status | `PATCH /tasks/{id}/status` | Yes | Their projects | Own task only |
 | Tasks | Cancel a task | `PATCH /tasks/{id}/status` | Yes | Their projects | No |
 | Tasks | History, activity, notifications | `GET /tasks/{id}/history`, `/activity`, `/notifications` | All | Their projects | Their projects |
