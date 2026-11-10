@@ -1,0 +1,50 @@
+# Code Quality: lint (ruff), formatting (ruff format), static typing (mypy).
+# Mirrors the pre-commit hooks in session-05-async-redis-celery, but in check-only
+# mode so CI never rewrites code.
+name: Code Quality
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SESSION_DIR: session-05-async-redis-celery
+
+jobs:
+  quality:
+    name: Lint, format & type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ${{ env.SESSION_DIR }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          working-directory: ${{ env.SESSION_DIR }}
+          enable-cache: true
+          cache-dependency-glob: ${{ env.SESSION_DIR }}/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy app

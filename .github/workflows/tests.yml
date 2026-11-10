@@ -1,0 +1,97 @@
+# Tests: full pytest suite against real PostgreSQL, MongoDB and Redis service
+# containers (same images as compose.yaml).
+name: Tests
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SESSION_DIR: session-05-async-redis-celery
+
+jobs:
+  pytest:
+    name: Pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: taskflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_user -d taskflow_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    # CI-only throwaway credentials; nothing here is a real secret.
+    # POSTGRES_DB points at the test database so `alembic upgrade head`
+    # migrates the same database the test suite connects to.
+    env:
+      POSTGRES_USER: ci_user
+      POSTGRES_PASSWORD: ci_password
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: taskflow_test
+      TEST_DATABASE_URL: postgresql+asyncpg://ci_user:ci_password@localhost:5432/taskflow_test
+      MONGO_URI: mongodb://localhost:27017
+      MONGO_DB_NAME: taskflow_imports_test
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET_KEY: ci-only-jwt-secret-key-not-for-production-0123456789
+      APP_ENV: development
+
+    defaults:
+      run:
+        working-directory: ${{ env.SESSION_DIR }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          working-directory: ${{ env.SESSION_DIR }}
+          enable-cache: true
+          cache-dependency-glob: ${{ env.SESSION_DIR }}/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run migrations
+        run: uv run alembic upgrade head
+
+      - name: Run tests
+        run: uv run pytest

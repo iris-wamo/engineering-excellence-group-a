@@ -1,0 +1,84 @@
+# Security Scan:
+#   - secrets:      TruffleHog scans the commits in the PR/push for leaked credentials
+#   - sast:         Bandit static analysis of application code (medium+ severity)
+#   - dependencies: pip-audit checks locked runtime dependencies for known CVEs
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+  schedule:
+    # Weekly, so newly published CVEs are caught even without new commits.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SESSION_DIR: session-05-async-redis-celery
+
+jobs:
+  secrets:
+    name: Secret scan
+    # Secret scanning is diff-based; the weekly run only needs the CVE audit.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog
+        uses: trufflesecurity/trufflehog@v3.99.8
+        with:
+          extra_args: --results=verified,unknown
+
+  sast:
+    name: Bandit (SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ${{ env.SESSION_DIR }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          working-directory: ${{ env.SESSION_DIR }}
+
+      # -ll: report medium and high severity only.
+      - name: Bandit
+        run: uvx bandit -r app -ll
+
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ${{ env.SESSION_DIR }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          working-directory: ${{ env.SESSION_DIR }}
+
+      # taskflow-shared is a GitHub tarball (not on PyPI), so it has no
+      # advisory data and is excluded from the audit.
+      - name: Export locked runtime dependencies
+        run: >-
+          uv export --frozen --no-dev --no-hashes --no-emit-project
+          --no-emit-package taskflow-shared -o requirements-audit.txt
+
+      - name: pip-audit
+        run: uvx pip-audit -r requirements-audit.txt --no-deps --disable-pip --strict
