@@ -36,9 +36,17 @@ repos:
         files: ^session-05-async-redis-celery/.*\.py$
         pass_filenames: false
 
+      # pre-commit buffers hook output until the hook ends, so a long test run
+      # looks frozen. When a terminal is attached, stream pytest straight to it to
+      # show live progress; otherwise (IDE Git UI, CI) fall back to captured output.
+      # The pytest exit code still decides whether the push is blocked.
       - id: pytest
         name: pytest (session-05)
-        entry: bash -c 'cd session-05-async-redis-celery && uv run pytest -q'
+        entry: >-
+          bash -c 'cd session-05-async-redis-celery &&
+          if { : >/dev/tty; } 2>/dev/null; then
+          printf "\n" >/dev/tty; uv run pytest -q --color=yes >/dev/tty 2>&1;
+          else uv run pytest -q; fi'
         language: system
         files: ^session-05-async-redis-celery/
         pass_filenames: false
