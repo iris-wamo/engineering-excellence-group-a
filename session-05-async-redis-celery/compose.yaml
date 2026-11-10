@@ -7,6 +7,7 @@ services:
       - .env
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
       - MONGO_URI=mongodb://mongodb:27017
       - REDIS_URL=redis://redis:6379/0
       - RUN_MIGRATIONS=true
@@ -18,14 +19,40 @@ services:
       redis:
         condition: service_healthy
 
+  celery-worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - RUN_MIGRATIONS=false
+    command:
+      [
+        "uv", "run", "celery", "-A", "app.worker.celery_app",
+        "worker", "--loglevel=INFO", "--concurrency=2",
+      ]
+    # Warm shutdown waits for in-flight tasks; match the hard task time limit.
+    stop_grace_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    # Host port is configurable: a native Postgres often already owns 5432.
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -44,8 +71,9 @@ services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
+    # Host port is configurable to avoid clashing with another project's Redis.
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -60,8 +88,12 @@ services:
       - .env
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
       - MONGO_URI=mongodb://mongodb:27017
       - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - TEST_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/taskflow_test
       - RUN_MIGRATIONS=false
     depends_on:
       postgres:
