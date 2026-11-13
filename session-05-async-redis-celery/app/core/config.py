@@ -15,6 +15,13 @@ class Settings(BaseAppConfig):
 
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # Celery: broker and result backend use separate Redis logical databases
+    # (/0 stays the app cache) so flushing one never wipes queued jobs or results.
+    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    CELERY_TASK_TIME_LIMIT: int = Field(60, ge=1)
+    CELERY_TASK_SOFT_TIME_LIMIT: int = Field(50, ge=1)
+
     # JWT authentication (access tokens only, no refresh tokens)
     JWT_SECRET_KEY: str = Field(..., min_length=32)
     JWT_ALGORITHM: str = "HS256"
