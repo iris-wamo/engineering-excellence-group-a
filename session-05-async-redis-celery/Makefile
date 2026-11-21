@@ -89,3 +89,10 @@ demo-shared:
 
 test-foundations:
 	uv run pytest tests/integration/test_shared_foundations.py
+
+.PHONY: demo-async
+
+N ?= 20
+DELAY ?=
+demo-async:
+	N=$(N) DELAY=$(DELAY) uv run python -m scripts.demo_async_summary

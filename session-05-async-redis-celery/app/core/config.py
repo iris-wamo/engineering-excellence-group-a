@@ -24,6 +24,11 @@ class Settings(BaseAppConfig):
     MONGO_DB_NAME: str = Field("taskflow_imports", alias="MONGO_DB_NAME")
     MONGO_URI: str | None = None
 
+    # /tasks/summary fake external call
+    SUMMARY_EXTERNAL_DELAY_SECONDS: float = Field(0.3, ge=0)
+    SUMMARY_EXTERNAL_TIMEOUT_SECONDS: float = Field(1.0, gt=0)
+    SUMMARY_EXTERNAL_FAIL: bool = False
+
     @field_validator("MONGO_URI", mode="before")
     @classmethod
     def build_mongo_uri(cls, value, info):

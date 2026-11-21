@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
+from contextlib import AbstractAsyncContextManager
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -20,6 +21,8 @@ engine: AsyncEngine = create_async_engine(
     echo=False,
     future=True,
 )
+
+SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

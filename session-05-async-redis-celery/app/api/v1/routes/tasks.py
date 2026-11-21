@@ -5,7 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.api.dependencies.deps import PaginationParams, SessionDep
+from app.api.dependencies.deps import (
+    PaginationParams,
+    SessionDep,
+    SessionFactoryDep,
+)
 from app.auth.dependencies import CurrentUserDep, get_current_user
 from app.core.exceptions import InvalidStatusTransitionError
 from app.models.task import TaskStatus
@@ -24,6 +28,7 @@ from app.schemas.task import (
     TaskStatusValue,
     TaskUpdate,
 )
+from app.schemas.task_summary import SummaryMode, TaskSummaryResponse
 from app.services.task_service import (
     TaskService,
     to_activity_log_response,
@@ -32,6 +37,10 @@ from app.services.task_service import (
     to_status_history_response,
     to_task_assign_response,
     to_task_response,
+)
+from app.services.task_summary_service import (
+    ExternalCallConfig,
+    TaskSummaryService,
 )
 from app.workflows.task_status_workflow import InvalidTransitionError
 
@@ -127,6 +136,50 @@ async def list_tasks(
         page=pagination.page,
         page_size=pagination.page_size,
         total=total,
+    )
+
+
+# must stay above /{task_id}
+@router.get(
+    "/summary",
+    response_model=TaskSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Task summary (blocking vs async)",
+    description=(
+        "Counts by status, overdue count (due_date in the past, not done or "
+        "cancelled), tasks assigned to you, plus one simulated external call. "
+        "Non-admins only count tasks in their projects. mode=async runs the "
+        "work concurrently with asyncio.gather; mode=blocking runs it in "
+        "sequence with a blocking time.sleep to show the event loop stalling. "
+        "The external call is bounded by asyncio.wait_for: on timeout the "
+        'partial summary comes back with external.status="timeout".'
+    ),
+)
+async def get_task_summary(
+    db: SessionDep,
+    session_factory: SessionFactoryDep,
+    current_user: CurrentUserDep,
+    mode: SummaryMode = Query(default=SummaryMode.ASYNC),
+    external_delay: float | None = Query(
+        default=None,
+        ge=0,
+        le=30,
+        description="Fake external delay in seconds (above the timeout = timeout)",
+    ),
+    external_fail: bool | None = Query(
+        default=None, description="Force the simulated external call to fail"
+    ),
+) -> TaskSummaryResponse:
+    """GET /tasks/summary - Task counts in async or blocking mode."""
+    # release the auth session's connection so the pool isn't exhausted
+    await db.close()
+    return await TaskSummaryService.get_summary(
+        session_factory,
+        current_user,
+        mode=mode,
+        external=ExternalCallConfig.from_settings(
+            delay=external_delay, fail=external_fail
+        ),
     )
 
 
