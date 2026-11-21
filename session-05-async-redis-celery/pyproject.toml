@@ -19,6 +19,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "sqlalchemy>=2.0.51",
     "uvicorn>=0.51.0",
+    "redis>=5.0.1,<7",
 ]
 
 [tool.uv.sources]

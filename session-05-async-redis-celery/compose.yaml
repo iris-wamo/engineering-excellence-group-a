@@ -8,12 +8,15 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
       - RUN_MIGRATIONS=true
     depends_on:
       postgres:
         condition: service_healthy
       mongodb:
         condition: service_started
+      redis:
+        condition: service_healthy
 
   postgres:
     image: postgres:16-alpine
@@ -38,6 +41,19 @@ services:
     volumes:
       - mongo_data:/data/db
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   test:
     build: .
     env_file:
@@ -45,12 +61,15 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
       - RUN_MIGRATIONS=false
     depends_on:
       postgres:
         condition: service_healthy
       mongodb:
         condition: service_started
+      redis:
+        condition: service_healthy
     volumes:
       - ./app:/app/app
       - ./tests:/app/tests
@@ -61,3 +80,4 @@ services:
 volumes:
   postgres_data:
   mongo_data:
+  redis_data:

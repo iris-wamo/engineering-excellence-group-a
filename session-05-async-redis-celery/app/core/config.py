@@ -13,6 +13,8 @@ class Settings(BaseAppConfig):
     DATABASE_URL: str | None = None
     TEST_DATABASE_URL: str | None = None
 
+    REDIS_URL: str = "redis://localhost:6379/0"
+
     # JWT authentication (access tokens only, no refresh tokens)
     JWT_SECRET_KEY: str = Field(..., min_length=32)
     JWT_ALGORITHM: str = "HS256"

@@ -1,6 +1,28 @@
-# TaskFlow API — Session 4: Shared Foundations, Domain Workflows & RBAC
+# TaskFlow API — Session 5: Async, Redis & Celery
 
 Engineering Excellence Program — TaskFlow Backend MVP focusing on database correctness, transactions, schema migrations, and query performance.
+
+## Session 5: Redis foundation (S5-01)
+
+Session 5 builds on the Session 4 app. Redis is available to later caching,
+channeling, and background-job tasks through one async client per API process.
+See [the Redis walkthrough](docs/s5-01-redis.md) for the code explanation,
+connection lifecycle, demo commands, and failure behavior.
+
+```bash
+cp .env.example .env  # first setup only; set a random JWT_SECRET_KEY
+make install
+make docker-up
+# In another terminal, in this same directory:
+make redis-cli
+# At the Redis prompt: PING   (expected: PONG)
+```
+
+Compose sets `REDIS_URL=redis://redis:6379/0` for API and test containers.
+For Python running on your laptop, `.env.example` uses
+`REDIS_URL=redis://localhost:6379/0`. Both API and test containers wait for the
+Redis healthcheck to pass. Stop any earlier session stack that uses ports
+8000, 5432, 27017, or 6379 before starting this complete stack.
 
 ## Overview
 
@@ -58,7 +80,7 @@ See [package integration](docs/shared-package-notes.md), [layer ownership](docs/
 
 Navigate to the directory:
 ```bash
-cd session-04-shared-backend-domain-rbac
+cd session-05-async-redis-celery
 ```
 
 Install dependencies using `uv`:
@@ -177,7 +199,7 @@ uv run ruff format --check .
 ## Directory & Demo Structure
 
 ```
-session-04-shared-backend-domain-rbac/
+session-05-async-redis-celery/
 ├── app/
 │   ├── main.py
 │   ├── api/

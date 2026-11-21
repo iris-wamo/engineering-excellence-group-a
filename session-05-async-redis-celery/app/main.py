@@ -6,11 +6,13 @@ from app.api.v1.routes.imports import router as imports_router
 from app.api.v1.routes.projects import router as projects_router
 from app.api.v1.routes.tasks import router as tasks_router
 from app.api.v1.routes.users import router as users_router
+from app.core.redis import redis_lifespan
 
 app = FastAPI(
     title="TaskFlow API",
-    description="Internal Team Work Management Backend — Session 4: JWT Auth & RBAC",
-    version="0.4.0",
+    description="Internal Team Work Management Backend — Session 5: Async, Redis & Celery",
+    version="0.5.0",
+    lifespan=redis_lifespan,
 )
 
 # Public: /auth/signup, /auth/login, /health. Every other router attaches
