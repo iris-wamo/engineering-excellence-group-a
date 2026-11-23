@@ -1,4 +1,4 @@
-.PHONY: install hooks lint lint-fix format typecheck type-check test pre-commit precommit run migrate quality docker-up docker-down docker-test docker-logs docker-migrate redis-cli seed-rbac create-admin
+.PHONY: install hooks lint lint-fix format typecheck type-check test pre-commit precommit run migrate quality docker-up docker-down docker-test docker-logs docker-migrate redis-cli seed-rbac create-admin celery-worker celery-ping
 
 install:
 	uv sync
@@ -77,7 +77,7 @@ docker-test:
 	docker compose --profile test run --rm test
 
 docker-logs:
-	docker compose logs -f api postgres redis
+	docker compose logs -f api postgres redis celery-worker
 
 docker-migrate:
 	docker compose exec api uv run alembic upgrade head
@@ -92,3 +92,9 @@ test-foundations:
 
 redis-cli:
 	docker compose exec redis redis-cli
+
+celery-worker:
+	uv run celery -A app.worker.celery_app worker --loglevel=INFO
+
+celery-ping:
+	docker compose exec celery-worker uv run python -c "from app.worker.tasks import ping; print(ping.delay().get(timeout=10))"
