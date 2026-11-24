@@ -35,7 +35,7 @@ async def _login(client: httpx.AsyncClient) -> str:
 async def _one(
     client: httpx.AsyncClient, mode: str, delay: float | None
 ) -> tuple[float, dict]:
-    params: dict[str, str] = {"mode": mode}
+    params: dict[str, str] = {"mode": mode, "cache": "false"}
     if delay is not None:
         params["external_delay"] = str(delay)
     started = time.perf_counter()

@@ -4,10 +4,12 @@ from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends, Query
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from taskflow_shared.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from taskflow_shared.pagination import PaginationParams as SharedPaginationParams
 
+from app.core.redis import get_optional_redis
 from app.db.database import AsyncSessionLocal, SessionFactory, get_async_session
 
 
@@ -18,6 +20,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_db)]
+RedisDep = Annotated[Redis | None, Depends(get_optional_redis)]
 
 
 def get_session_factory() -> SessionFactory:

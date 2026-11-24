@@ -32,6 +32,11 @@ async def redis_lifespan(app: FastAPI) -> AsyncIterator[None]:
         await client.aclose()
 
 
+def get_optional_redis(request: Request) -> Redis | None:
+    """Shared client, or None so callers can fall back when Redis is unavailable."""
+    return getattr(request.app.state, "redis", None)
+
+
 def get_redis(request: Request) -> Redis:
     """Return the shared client; callers should bound request-path operations."""
     client = getattr(request.app.state, "redis", None)

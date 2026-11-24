@@ -38,6 +38,10 @@ class Settings(BaseAppConfig):
     SUMMARY_EXTERNAL_TIMEOUT_SECONDS: float = Field(1.0, gt=0)
     SUMMARY_EXTERNAL_FAIL: bool = False
 
+    # /tasks/summary Redis cache
+    SUMMARY_CACHE_TTL_SECONDS: int = Field(60, ge=1)
+    SUMMARY_CACHE_TIMEOUT_SECONDS: float = Field(0.5, gt=0)
+
     @field_validator("MONGO_URI", mode="before")
     @classmethod
     def build_mongo_uri(cls, value, info):
