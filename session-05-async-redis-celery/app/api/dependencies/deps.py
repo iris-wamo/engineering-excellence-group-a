@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from taskflow_shared.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from taskflow_shared.pagination import PaginationParams as SharedPaginationParams
 
-from app.db.database import get_async_session
+from app.db.database import AsyncSessionLocal, SessionFactory, get_async_session
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -18,6 +18,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_db)]
+
+
+def get_session_factory() -> SessionFactory:
+    """One session per concurrent query (a session can't run two at once)."""
+    return AsyncSessionLocal
+
+
+SessionFactoryDep = Annotated[SessionFactory, Depends(get_session_factory)]
 
 
 class PaginationParams(SharedPaginationParams):

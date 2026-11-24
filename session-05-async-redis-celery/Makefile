@@ -98,3 +98,10 @@ celery-worker:
 
 celery-ping:
 	docker compose exec celery-worker uv run python -c "from app.worker.tasks import ping; print(ping.delay().get(timeout=10))"
+
+.PHONY: demo-async
+
+N ?= 20
+DELAY ?=
+demo-async:
+	N=$(N) DELAY=$(DELAY) uv run python -m scripts.demo_async_summary

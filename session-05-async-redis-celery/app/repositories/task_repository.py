@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project_member import ProjectMember
@@ -11,9 +11,61 @@ from app.models.task import Task, TaskStatus
 from app.models.task_assignment_history import TaskAssignmentHistory
 from app.models.task_status_history import TaskStatusHistory
 
+_OPEN_EXCLUDED = (TaskStatus.DONE, TaskStatus.CANCELLED)
+
+
+def _scope(query: Select, member_user_id: UUID | None) -> Select:
+    """Only tasks in the user's projects."""
+    if member_user_id is None:
+        return query
+    return query.where(
+        Task.project_id.in_(
+            select(ProjectMember.project_id).where(
+                ProjectMember.user_id == member_user_id
+            )
+        )
+    )
+
 
 class TaskRepository:
     """Repository handling database operations for Task and task-history entities."""
+
+    @staticmethod
+    async def count_by_status(
+        db: AsyncSession, *, member_user_id: UUID | None = None
+    ) -> dict[TaskStatus, int]:
+        """Task count per status."""
+        query = _scope(
+            select(Task.status, func.count()).group_by(Task.status), member_user_id
+        )
+        rows = (await db.execute(query)).all()
+        return {row[0]: int(row[1]) for row in rows}
+
+    @staticmethod
+    async def count_overdue(
+        db: AsyncSession, *, now: datetime, member_user_id: UUID | None = None
+    ) -> int:
+        """Past due and not done/cancelled."""
+        query = _scope(
+            select(func.count())
+            .select_from(Task)
+            .where(Task.due_date.is_not(None))
+            .where(Task.due_date < now)
+            .where(Task.status.not_in(_OPEN_EXCLUDED)),
+            member_user_id,
+        )
+        return int((await db.execute(query)).scalar_one())
+
+    @staticmethod
+    async def count_assigned_to(
+        db: AsyncSession, user_id: UUID, *, member_user_id: UUID | None = None
+    ) -> int:
+        """Tasks assigned to the user."""
+        query = _scope(
+            select(func.count()).select_from(Task).where(Task.assigned_to == user_id),
+            member_user_id,
+        )
+        return int((await db.execute(query)).scalar_one())
 
     @staticmethod
     async def get_by_id(db: AsyncSession, task_id: UUID) -> Task | None:
