@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.dependencies.deps import (
     PaginationParams,
+    RedisDep,
     SessionDep,
     SessionFactoryDep,
 )
@@ -28,7 +29,12 @@ from app.schemas.task import (
     TaskStatusValue,
     TaskUpdate,
 )
-from app.schemas.task_summary import SummaryMode, TaskSummaryResponse
+from app.schemas.task_summary import ExternalStatus, SummaryMode, TaskSummaryResponse
+from app.services.summary_cache import (
+    get_cached_summary,
+    invalidate_project_summaries,
+    set_cached_summary,
+)
 from app.services.task_service import (
     TaskService,
     to_activity_log_response,
@@ -85,11 +91,13 @@ def _transition_error(exc: InvalidTransitionError) -> InvalidStatusTransitionErr
 async def create_task(
     payload: TaskCreate,
     db: SessionDep,
+    redis: RedisDep,
     response: Response,
     current_user: CurrentUserDep,
 ) -> TaskResponse:
     """POST /tasks - Create a new task."""
     task = await TaskService.create_task(db, payload, actor=current_user)
+    await invalidate_project_summaries(redis, db, task.project_id)
     response.headers["location"] = f"/tasks/{task.id}"
     return to_task_response(task)
 
@@ -152,10 +160,13 @@ async def list_tasks(
         "work concurrently with asyncio.gather; mode=blocking runs it in "
         "sequence with a blocking time.sleep to show the event loop stalling. "
         "The external call is bounded by asyncio.wait_for: on timeout the "
-        'partial summary comes back with external.status="timeout".'
+        'partial summary comes back with external.status="timeout". '
+        "The default async result is cached per user in Redis (X-Cache: HIT|MISS)."
     ),
 )
 async def get_task_summary(
+    redis: RedisDep,
+    response: Response,
     db: SessionDep,
     session_factory: SessionFactoryDep,
     current_user: CurrentUserDep,
@@ -169,11 +180,27 @@ async def get_task_summary(
     external_fail: bool | None = Query(
         default=None, description="Force the simulated external call to fail"
     ),
+    use_cache: bool = Query(
+        default=True, alias="cache", description="Set false to skip the cache"
+    ),
 ) -> TaskSummaryResponse:
     """GET /tasks/summary - Task counts in async or blocking mode."""
+    # only the normal request is cached; demo/override requests always compute
+    cacheable = (
+        use_cache
+        and mode is SummaryMode.ASYNC
+        and external_delay is None
+        and external_fail is None
+    )
+    if cacheable:
+        cached = await get_cached_summary(redis, current_user.id)
+        if cached is not None:
+            response.headers["X-Cache"] = "HIT"
+            return cached
+
     # release the auth session's connection so the pool isn't exhausted
     await db.close()
-    return await TaskSummaryService.get_summary(
+    summary = await TaskSummaryService.get_summary(
         session_factory,
         current_user,
         mode=mode,
@@ -181,6 +208,11 @@ async def get_task_summary(
             delay=external_delay, fail=external_fail
         ),
     )
+    response.headers["X-Cache"] = "MISS"
+    # don't keep a partial (timeout/error) summary around for the whole TTL
+    if cacheable and summary.external.status is ExternalStatus.OK:
+        await set_cached_summary(redis, current_user.id, summary)
+    return summary
 
 
 @router.get(
@@ -218,10 +250,12 @@ async def update_task(
     task_id: UUID,
     payload: TaskUpdate,
     db: SessionDep,
+    redis: RedisDep,
     current_user: CurrentUserDep,
 ) -> TaskResponse:
     """PATCH /tasks/{task_id} - Set or clear the due date as an authorized manager."""
     task = await TaskService.update_task(db, task_id, payload, actor=current_user)
+    await invalidate_project_summaries(redis, db, task.project_id)
     return to_task_response(task)
 
 
@@ -242,6 +276,7 @@ async def update_task_status(
     task_id: UUID,
     payload: TaskStatusUpdate,
     db: SessionDep,
+    redis: RedisDep,
     current_user: CurrentUserDep,
 ) -> TaskResponse:
     """PATCH /tasks/{task_id}/status - Update task status as the acting user."""
@@ -251,6 +286,7 @@ async def update_task_status(
         )
     except InvalidTransitionError as exc:
         raise _transition_error(exc) from exc
+    await invalidate_project_summaries(redis, db, task.project_id)
     return to_task_response(task)
 
 
@@ -271,6 +307,7 @@ async def assign_task(
     task_id: UUID,
     payload: TaskAssignRequest,
     db: SessionDep,
+    redis: RedisDep,
     current_user: CurrentUserDep,
     simulate_failure: bool = Query(
         default=False,
@@ -301,6 +338,7 @@ async def assign_task(
         )
     except InvalidTransitionError as exc:
         raise _transition_error(exc) from exc
+    await invalidate_project_summaries(redis, db, task.project_id)
     return to_task_assign_response(
         task,
         assignment_history,

@@ -3,13 +3,15 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.roles import UserRole
 from app.models.project_member import ProjectMember
 from app.models.task import Task, TaskStatus
 from app.models.task_assignment_history import TaskAssignmentHistory
 from app.models.task_status_history import TaskStatusHistory
+from app.models.user import User
 
 _OPEN_EXCLUDED = (TaskStatus.DONE, TaskStatus.CANCELLED)
 
@@ -66,6 +68,15 @@ class TaskRepository:
             member_user_id,
         )
         return int((await db.execute(query)).scalar_one())
+
+    @staticmethod
+    async def summary_audience(db: AsyncSession, project_id: UUID) -> set[UUID]:
+        """Project members plus admins: everyone whose summary counts this project."""
+        query = union(
+            select(ProjectMember.user_id).where(ProjectMember.project_id == project_id),
+            select(User.id).where(User.role == UserRole.ADMIN),
+        )
+        return set((await db.execute(query)).scalars().all())
 
     @staticmethod
     async def get_by_id(db: AsyncSession, task_id: UUID) -> Task | None:
