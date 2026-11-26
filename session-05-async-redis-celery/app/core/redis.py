@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from redis.asyncio import Redis
 
 from app.core.config import settings
+from app.events.publisher import bind_redis
 
 
 @asynccontextmanager
@@ -26,9 +27,11 @@ async def redis_lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with asyncio.timeout(5):
             await client.ping()
         app.state.redis = client
+        bind_redis(client)
         yield
     finally:
         app.state.redis = None
+        bind_redis(None)
         await client.aclose()
 
 
