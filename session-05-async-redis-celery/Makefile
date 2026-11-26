@@ -105,3 +105,8 @@ N ?= 20
 DELAY ?=
 demo-async:
 	N=$(N) DELAY=$(DELAY) uv run python -m scripts.demo_async_summary
+
+.PHONY: pubsub-consumer
+
+pubsub-consumer:
+	uv run python -m app.events.pubsub_consumer
