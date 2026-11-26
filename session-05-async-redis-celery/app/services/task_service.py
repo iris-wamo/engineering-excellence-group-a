@@ -21,6 +21,8 @@ from app.core.exceptions import (
     StatusChangeForbiddenError,
     TaskNotFoundError,
 )
+from app.events.publisher import publish_task_event
+from app.events.schemas import TaskEvent, TaskEventData, TaskEventType
 from app.models.activity_log import ActivityLog
 from app.models.notification import Notification
 from app.models.task import Task, TaskPriority, TaskStatus
@@ -375,6 +377,18 @@ class TaskService:
 
         # Transaction already committed: load the persisted row
         await db.refresh(task)
+        await publish_task_event(
+            TaskEvent(
+                type=TaskEventType.STATUS_CHANGED,
+                actor_id=actor_id,
+                task_id=task.id,
+                project_id=task.project_id,
+                data=TaskEventData(
+                    from_status=_STATUS_TO_API[prev_status],
+                    to_status=_STATUS_TO_API[target_status],
+                ),
+            )
+        )
         return task
 
     @staticmethod
@@ -541,6 +555,25 @@ class TaskService:
                 await db.refresh(status_history)
             await db.refresh(activity_log)
             await db.refresh(notification)
+
+            # committed; publishing never raises, so it can't trigger the rollback below
+            await publish_task_event(
+                TaskEvent(
+                    type=TaskEventType.ASSIGNED,
+                    actor_id=assigned_by_user.id,
+                    task_id=task.id,
+                    project_id=task.project_id,
+                    data=TaskEventData(
+                        assignee_id=payload.assignee_id,
+                        from_status=_STATUS_TO_API[prev_status]
+                        if status_changed
+                        else None,
+                        to_status=_STATUS_TO_API[target_status]
+                        if status_changed
+                        else None,
+                    ),
+                )
+            )
 
             return (
                 task,
